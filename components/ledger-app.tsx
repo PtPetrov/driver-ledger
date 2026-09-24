@@ -361,19 +361,21 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         };
         if (!active) return;
 
+        const normalizedSettings = { ...initialSettings, ...result.document.settings };
+        const normalizedRates = migrateRates(result.document.rates);
         const document = {
           version: 8,
           drivers: result.document.drivers,
           entries: result.document.entries,
           trips: result.document.trips,
-          settings: result.document.settings,
-          rates: result.document.rates,
+          settings: normalizedSettings,
+          rates: normalizedRates,
         };
         setDrivers(document.drivers);
         setEntries(document.entries);
         setTrips(document.trips);
-        setSettings({ ...initialSettings, ...document.settings });
-        setRates(migrateRates(document.rates));
+        setSettings(normalizedSettings);
+        setRates(normalizedRates);
         revisionRef.current = result.revision;
         lastSavedRef.current = JSON.stringify(document);
         setSyncState("saved");

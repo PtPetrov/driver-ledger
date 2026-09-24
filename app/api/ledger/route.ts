@@ -85,7 +85,7 @@ export async function PUT(request: NextRequest) {
     if (error.message.includes("revision_conflict")) {
       return json({ error: "Данните са променени от друго устройство." }, 409);
     }
-    if (error.message.includes("insufficient_role")) {
+    if (error.message.includes("insufficient_permissions")) {
       return json({ error: "Нямате право да редактирате данните." }, 403);
     }
     return json({ error: "Промените не могат да бъдат записани." }, 500);
