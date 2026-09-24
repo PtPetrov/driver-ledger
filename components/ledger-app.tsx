@@ -58,7 +58,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Toaster } from "@/components/ui/sonner";
 import {
   Table,
   TableBody,
@@ -102,6 +101,10 @@ type RateSettings = {
   kilometer: Record<VehicleClass, Record<DriverLevel, number>>;
   activities: RateItem[];
 };
+
+const LOAD_TOAST_ID = "ledger-load";
+const SYNC_TOAST_ID = "ledger-sync";
+const SIGN_OUT_TOAST_ID = "sign-out";
 
 const initialRates: RateSettings = {
   effectiveDate: "2026-01-01",
@@ -270,6 +273,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   const [reportTripId, setReportTripId] = useState("");
   const [reportDriverId, setReportDriverId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [syncState, setSyncState] = useState<"loading" | "saved" | "saving" | "error">("loading");
   const revisionRef = useRef(0);
   const savingRef = useRef(false);
@@ -292,6 +296,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
     }
 
     savingRef.current = true;
+    let didSave = false;
     try {
       do {
         pendingSaveRef.current = false;
@@ -299,6 +304,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         if (!latest || latest.serialized === lastSavedRef.current) continue;
 
         setSyncState("saving");
+        toast.loading("Запазване на промените…", { id: SYNC_TOAST_ID });
         const response = await fetch("/api/ledger", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -309,13 +315,14 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         });
 
         if (response.status === 401) {
+          toast.error("Сесията е изтекла. Влезте отново.", { id: SYNC_TOAST_ID });
           router.replace("/login");
           router.refresh();
           return;
         }
         if (response.status === 409) {
           setSyncState("error");
-          toast.error("Данните са променени на друго устройство. Страницата ще бъде обновена.");
+          toast.error("Данните са променени на друго устройство. Страницата ще бъде обновена.", { id: SYNC_TOAST_ID });
           window.setTimeout(() => window.location.reload(), 1200);
           return;
         }
@@ -328,10 +335,18 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         revisionRef.current = result.revision;
         lastSavedRef.current = latest.serialized;
         setSyncState("saved");
+        didSave = true;
       } while (pendingSaveRef.current);
+
+      if (didSave) {
+        toast.success("Промените са запазени.", { id: SYNC_TOAST_ID, duration: 1800 });
+      }
     } catch (error) {
       setSyncState("error");
-      toast.error(error instanceof Error ? error.message : "Промените не могат да бъдат записани.");
+      toast.error(error instanceof Error ? error.message : "Промените не могат да бъдат записани.", {
+        id: SYNC_TOAST_ID,
+        duration: 5000,
+      });
     } finally {
       savingRef.current = false;
     }
@@ -340,9 +355,11 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   useEffect(() => {
     let active = true;
     const load = async () => {
+      toast.loading("Зареждане на данните…", { id: LOAD_TOAST_ID });
       try {
         const response = await fetch("/api/ledger", { cache: "no-store" });
         if (response.status === 401) {
+          toast.error("Сесията е изтекла. Влезте отново.", { id: LOAD_TOAST_ID });
           router.replace("/login");
           router.refresh();
           return;
@@ -380,10 +397,13 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         lastSavedRef.current = JSON.stringify(document);
         setSyncState("saved");
         setHydrated(true);
+        toast.success("Данните са заредени.", { id: LOAD_TOAST_ID, duration: 1800 });
       } catch (error) {
         if (!active) return;
         setSyncState("error");
-        toast.error(error instanceof Error ? error.message : "Данните не могат да бъдат заредени.");
+        toast.error(error instanceof Error ? error.message : "Данните не могат да бъдат заредени.", {
+          id: LOAD_TOAST_ID,
+        });
       }
     };
 
@@ -601,6 +621,23 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
     setReportDriverId(null);
     setFormPage(null);
     toast.success("Всички командировки и клиенти са изтрити.");
+  };
+
+  const signOut = async () => {
+    setSigningOut(true);
+    toast.loading("Излизане от профила…", { id: SIGN_OUT_TOAST_ID });
+    try {
+      const response = await fetch("/auth/signout", { method: "POST" });
+      if (!response.ok) throw new Error("Изходът не може да бъде завършен.");
+      toast.success("Излязохте от профила.", { id: SIGN_OUT_TOAST_ID });
+      router.replace("/login");
+      router.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Изходът не може да бъде завършен.", {
+        id: SIGN_OUT_TOAST_ID,
+      });
+      setSigningOut(false);
+    }
   };
 
   useEffect(() => {
@@ -859,7 +896,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
                 <div className="settings-divider" />
                 <div className="settings-section"><div className="settings-icon"><WalletCards /></div><div className="settings-fields"><h2>Валута</h2><p>Използва се за всички суми и изчисления в приложението.</p><Select value={settings.currency} onValueChange={(value) => setSettings((current) => ({ ...current, currency: value }))}><SelectTrigger className="currency-select"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="EUR">EUR - Евро</SelectItem><SelectItem value="BGN">BGN - Български лев</SelectItem></SelectContent></Select></div></div>
                 <div className="settings-divider" />
-                <div className="settings-section"><div className="settings-icon"><Cloud /></div><div className="settings-fields"><h2>Профил и синхронизация</h2><p>Влезли сте като <strong>{userEmail}</strong>. Данните са достъпни само за членовете на вашата организация.</p><div className={`account-sync-status ${syncState}`}>{syncState === "saving" ? <LoaderCircle className="auth-spinner" /> : syncState === "error" ? <CloudOff /> : <Cloud />}<span>{syncState === "loading" ? "Зареждане…" : syncState === "saving" ? "Запазване на промените…" : syncState === "error" ? "Грешка при синхронизацията" : "Всички промени са записани"}</span></div><form action="/auth/signout" method="post"><Button type="submit" variant="outline"><LogOut /> Изход</Button></form></div></div>
+                <div className="settings-section"><div className="settings-icon"><Cloud /></div><div className="settings-fields"><h2>Профил и синхронизация</h2><p>Влезли сте като <strong>{userEmail}</strong>. Данните са достъпни само за членовете на вашата организация.</p><div className={`account-sync-status ${syncState}`}>{syncState === "saving" ? <LoaderCircle className="auth-spinner" /> : syncState === "error" ? <CloudOff /> : <Cloud />}<span>{syncState === "loading" ? "Зареждане…" : syncState === "saving" ? "Запазване на промените…" : syncState === "error" ? "Грешка при синхронизацията" : "Всички промени са записани"}</span></div><Button type="button" variant="outline" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? <LoaderCircle className="auth-spinner" /> : <LogOut />} Изход</Button></div></div>
                 <div className="settings-divider" />
                 <div className="settings-section danger-section"><div className="settings-icon"><Trash2 /></div><div className="settings-fields"><h2>Изтриване на данни</h2><p>Премахнете всички командировки и свързаните с тях клиенти. Шофьорите, ставките и настройките ще бъдат запазени.</p><AlertDialog><AlertDialogTrigger asChild><Button variant="outline" className="destructive-outline"><Trash2 /> Изтрий всички командировки и клиенти</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Изтриване на всички командировки и клиенти?</AlertDialogTitle><AlertDialogDescription>Всички командировки и клиенти в организацията ще бъдат изтрити от базата данни. Това действие не може да бъде отменено.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Отказ</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={clearTripData}>Изтрий всичко</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog></div></div>
               </CardContent>
@@ -884,7 +921,6 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
           </>}
         </div>
       </Tabs>
-      <Toaster richColors position="top-right" />
     </main>
   );
 }

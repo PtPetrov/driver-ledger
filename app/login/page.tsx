@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import { CircleGauge, LoaderCircle, LockKeyhole, Mail, UserRound } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +12,8 @@ import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
 
 type AuthMode = "signin" | "signup";
+
+const AUTH_TOAST_ID = "authentication";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -31,10 +34,15 @@ export default function LoginPage() {
     const fullName = String(form.get("fullName") || "").trim();
     const supabase = createClient();
 
+    toast.loading(mode === "signin" ? "Влизане в профила…" : "Създаване на профила…", {
+      id: AUTH_TOAST_ID,
+    });
+
     try {
       if (mode === "signin") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        toast.success("Успешен вход.", { id: AUTH_TOAST_ID });
         router.replace("/");
         router.refresh();
         return;
@@ -51,6 +59,7 @@ export default function LoginPage() {
       if (error) throw error;
 
       if (data.session) {
+        toast.success("Профилът е създаден.", { id: AUTH_TOAST_ID });
         router.replace("/");
         router.refresh();
         return;
@@ -58,17 +67,21 @@ export default function LoginPage() {
 
       setSuccess(true);
       setMessage("Проверете имейла си и потвърдете регистрацията.");
+      toast.success("Изпратихме имейл за потвърждение.", { id: AUTH_TOAST_ID });
     } catch (error) {
       const text = error instanceof Error ? error.message.toLocaleLowerCase() : "";
+      let errorMessage: string;
       if (text.includes("invalid login credentials")) {
-        setMessage("Невалиден имейл или парола.");
+        errorMessage = "Невалиден имейл или парола.";
       } else if (text.includes("already registered")) {
-        setMessage("Вече има профил с този имейл.");
+        errorMessage = "Вече има профил с този имейл.";
       } else if (text.includes("password")) {
-        setMessage("Паролата трябва да е поне 8 знака.");
+        errorMessage = "Паролата трябва да е поне 8 знака.";
       } else {
-        setMessage("Заявката не може да бъде изпълнена. Опитайте отново.");
+        errorMessage = "Заявката не може да бъде изпълнена. Опитайте отново.";
       }
+      setMessage(errorMessage);
+      toast.error(errorMessage, { id: AUTH_TOAST_ID });
     } finally {
       setPending(false);
     }
