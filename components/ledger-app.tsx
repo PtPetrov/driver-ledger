@@ -327,6 +327,13 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   const selectedTrip = trips.find((trip) => trip.id === selectedTripId);
   const unassignedEntries = entries.filter((entry) => !trips.some((trip) => trip.id === entry.tripId));
   const scopedEntries = selectedTripId === "unassigned" ? unassignedEntries : entries.filter((entry) => entry.tripId === selectedTripId);
+  const tripServiceTotals = useMemo(() => scopedEntries.reduce((totals, entry) => {
+    const shares = splitServiceEarnings(workForEntry(entry, rates), entry.driverIds, entry.helperCount ?? 0);
+    return {
+      drivers: totals.drivers + Object.values(shares.drivers).reduce((sum, amount) => sum + amount, 0),
+      helpers: totals.helpers + shares.helpersTotal,
+    };
+  }, { drivers: 0, helpers: 0 }), [scopedEntries, rates]);
   const editingEntryTrip = trips.find((trip) => trip.id === editingEntry.tripId);
   const openTrip = (id: string | null) => {
     setSelectedTripId(id);
@@ -749,7 +756,13 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
               <div><p className="eyebrow">{clientCount(scopedEntries.length)}</p><h1>{selectedTrip ? `Командировка № ${selectedTrip.number}` : "Без командировка"}</h1><p>{selectedTrip ? `${fullDate(selectedTrip.departureDate)} · ${number(selectedTrip.totalKilometers)} км · ${settings.vehicle}` : "Отворете клиент, за да го свържете с командировка."}</p></div>
               <div className="heading-actions">{selectedTrip && <><Button variant="outline" aria-label="Редактирай командировката" onClick={() => { setEditingTrip({ ...selectedTrip }); setTripError(""); setFormPage("trip"); }}><Pencil /><span>Редактирай</span></Button><Button variant="outline" onClick={openRestPage}><CalendarDays /> {selectedTrip.restDays ? "Редактирай почивка" : "Добави почивка"}</Button><AlertDialog><AlertDialogTrigger asChild><Button variant="outline" className="destructive-outline"><Trash2 /> Изтрий</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Изтриване на командировка № {selectedTrip.number}?</AlertDialogTitle><AlertDialogDescription>{scopedEntries.length ? `Командировката и свързаните с нея ${clientCount(scopedEntries.length)} ще бъдат изтрити.` : "Командировката ще бъде изтрита."} Това действие не може да бъде отменено.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Отказ</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => deleteTrip(selectedTrip)}>Изтрий командировката</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog><Button onClick={openNewEntry}><Plus /> Нов клиент</Button></>}</div>
             </section>
-            {selectedTrip && <div className="trip-summary"><div><span>Общо километри</span><strong>{number(selectedTrip.totalKilometers)} км</strong></div><div><span>Услуги</span><strong>{money(scopedEntries.reduce((sum, entry) => sum + workForEntry(entry, rates), 0), settings.currency)}</strong></div><div><span>Почивка (общо)</span><strong>{money(selectedTrip.restDays * (selectedTrip.pricing?.restPerDay ?? rates.restPerDay), settings.currency)}</strong></div>{drivers.map((driver) => <div key={driver.id}><span>За {driver.name}</span><strong>{money(earningsForTrip(selectedTrip, driver).total, settings.currency)}</strong></div>)}</div>}
+            {selectedTrip && <div className="trip-summary">
+              <div><span>Общо километри</span><strong>{number(selectedTrip.totalKilometers)} км</strong></div>
+              <div><span>Услуги шофьори</span><strong>{money(tripServiceTotals.drivers, settings.currency)}</strong></div>
+              <div><span>Услуги помощници</span><strong>{money(tripServiceTotals.helpers, settings.currency)}</strong></div>
+              <div><span>Почивка (общо)</span><strong>{money(selectedTrip.restDays * (selectedTrip.pricing?.restPerDay ?? rates.restPerDay), settings.currency)}</strong></div>
+              {drivers.map((driver) => <div key={driver.id}><span>За {driver.name}</span><strong>{money(earningsForTrip(selectedTrip, driver).total, settings.currency)}</strong></div>)}
+            </div>}
             <Card className="panel entries-panel">
               <CardContent className="panel-content entries-content">
                 <div className="filters-row">
