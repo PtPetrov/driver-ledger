@@ -44,6 +44,8 @@ export async function GET() {
   if (error || !state) return json({ error: "Данните не могат да бъдат заредени." }, 500);
 
   return json({
+    organizationId: membership.organization_id,
+    userId: subject,
     document: state.document,
     revision: Number(state.revision),
     updatedAt: state.updated_at,
@@ -62,6 +64,17 @@ export async function PUT(request: NextRequest) {
 
   const { supabase, subject, error: authError } = await authenticatedClient();
   if (authError || !subject) return json({ error: "Необходим е вход." }, 401);
+
+  // Bind new clients' pending writes to the identity/organization they loaded.
+  // Older clients remain compatible; normal auth/RLS checks still apply to them.
+  const expectedUser = request.headers.get("x-ledger-user");
+  const expectedOrganization = request.headers.get("x-ledger-organization");
+  if (expectedUser && expectedUser !== subject) return json({ error: "Профилът е променен. Отворете приложението отново." }, 403);
+  if (expectedOrganization) {
+    const { data: membership, error } = await supabase.from("organization_members")
+      .select("organization_id").eq("user_id", subject).order("created_at", { ascending: true }).limit(1).maybeSingle();
+    if (error || membership?.organization_id !== expectedOrganization) return json({ error: "Организацията е променена. Отворете приложението отново." }, 403);
+  }
 
   let input: unknown;
   try {

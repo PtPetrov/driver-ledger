@@ -39,7 +39,7 @@ try {
     try {
       for (const width of [320, 375, 393, 430, 768, 1024, 1440]) {
         const page = await browser.newPage({ viewport: { width, height: 900 } });
-        await page.route("**/api/ledger", route => route.fulfill({ json: { document, revision: 1 } }));
+        await page.route("**/api/ledger", route => route.fulfill({ json: { document, revision: 1, organizationId: "layout-org", userId: "layout-user" } }));
         await page.goto("http://127.0.0.1:4178");
         await page.getByRole("tab", { name: "Настройки", exact: true }).click();
         assert.equal(await page.locator(".settings-menu-button").count(), 3);

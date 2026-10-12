@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useLedgerSync } from "@/hooks/use-ledger-sync";
 import {
   ArrowLeft,
   BriefcaseBusiness,
@@ -106,8 +107,6 @@ type RateSettings = {
   activities: RateItem[];
 };
 
-const LOAD_TOAST_ID = "ledger-load";
-const SYNC_TOAST_ID = "ledger-sync";
 const SIGN_OUT_TOAST_ID = "sign-out";
 
 const initialRates: RateSettings = {
@@ -254,6 +253,22 @@ const migrateRates = (saved?: Partial<RateSettings>) => {
   };
 };
 
+type LedgerDocument = { version: number; drivers: Driver[]; entries: Entry[]; trips: BusinessTrip[]; settings: Settings; rates: RateSettings };
+type FormDraft = { formPage: "entry" | "trip" | "rest" | null; editingEntry: Entry; editingTrip: BusinessTrip; editingRestDays: number; quantityInput: string; helpersEnabled: boolean; selectedTripId: string | null };
+
+function normalizeLedger(document: LedgerDocument): LedgerDocument {
+  if (document.version !== 10) throw new Error("Нова версия на данните. Обновете приложението преди редакция.");
+  const settings = { ...initialSettings, ...document.settings };
+  const rates = migrateRates(document.rates);
+  return {
+    ...document, version: 10, settings, rates,
+    entries: document.entries.map(entry => ({ ...entry, helperCount: entry.helperCount ?? 0, pricing: entry.pricing ?? captureEntryPricing(entry.rateItemId, document.drivers, rates, { ...settings, vehicleClass: entry.vehicleClass || "up-to-8-8" }) })),
+    trips: document.trips.map(trip => ({ ...trip, pricing: trip.pricing ?? captureTripPricing(document.drivers, rates, settings) })),
+  };
+}
+
+const syncSectionLabels: Record<string, string> = { entries: "Клиент", trips: "Командировка", drivers: "Шофьор", settings: "Настройки", rates: "Ставки", records: "Свързани командировки, клиенти и шофьори (изтриване или дублиран номер)" };
+
 export default function LedgerApp({ userEmail }: { userEmail: string }) {
   const router = useRouter();
   const [drivers, setDrivers] = useState<Driver[]>(initialDrivers);
@@ -274,14 +289,32 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   const [search, setSearch] = useState("");
   const [reportTripId, setReportTripId] = useState("");
   const [reportDriverId, setReportDriverId] = useState<string | null>(null);
-  const [hydrated, setHydrated] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-  const [syncState, setSyncState] = useState<"loading" | "saved" | "saving" | "error">("loading");
-  const revisionRef = useRef(0);
-  const savingRef = useRef(false);
-  const pendingSaveRef = useRef(false);
-  const lastSavedRef = useRef("");
-  const latestDocumentRef = useRef<{ document: unknown; serialized: string } | null>(null);
+  const [reviewSync, setReviewSync] = useState(false);
+  const documentState = useMemo(() => ({ version: 10, drivers, entries, trips, settings, rates }), [drivers, entries, trips, settings, rates]);
+  const formDraft = useMemo(() => ({ formPage, editingEntry, editingTrip, editingRestDays, quantityInput, helpersEnabled, selectedTripId }), [formPage, editingEntry, editingTrip, editingRestDays, quantityInput, helpersEnabled, selectedTripId]);
+  const applyDocument = useCallback((document: LedgerDocument) => {
+    setDrivers(document.drivers); setEntries(document.entries); setTrips(document.trips);
+    setSettings(document.settings); setRates(document.rates);
+  }, []);
+  const restoreForm = useCallback((draft: FormDraft) => {
+    if (!["entry", "trip", "rest"].includes(draft.formPage || "")) return;
+    if (!draft.editingEntry || !draft.editingTrip) return;
+    setFormPage(draft.formPage); setEditingEntry(draft.editingEntry); setEditingTrip(draft.editingTrip);
+    setEditingRestDays(draft.editingRestDays); setQuantityInput(draft.quantityInput);
+    setHelpersEnabled(draft.helpersEnabled); setSelectedTripId(draft.selectedTripId); setActiveTab("trips");
+  }, []);
+  const onUnauthorized = useCallback(() => {
+    toast.error("Сесията е изтекла. Черновата е запазена в този раздел. Влезте отново.");
+    router.replace("/login"); router.refresh();
+  }, [router]);
+  const sync = useLedgerSync({
+    document: documentState, formDraft, editing: formPage !== null,
+    apply: applyDocument, restoreForm, normalize: normalizeLedger, onUnauthorized,
+  });
+  const hydrated = sync.hydrated;
+  const syncState = sync.view.status;
+  const syncLabel = syncState === "loading" ? "Зареждане…" : syncState === "saving" ? "Запазване…" : syncState === "pending" ? "Има незапазени промени" : syncState === "offline" ? "Няма връзка — проверете незапазените промени" : syncState === "conflict" ? "Има промени за преглед" : syncState === "error" ? "Грешка при синхронизацията" : "Всички промени са записани";
 
   const effectiveDriverRateForClass = useCallback((vehicleClass: VehicleClass, driver: Driver) =>
     drivers.length === 1 ? settings.singleDriverKilometerRate : driverRateForClass(vehicleClass, driver, rates),
@@ -290,139 +323,6 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   const effectiveDriverRateForEntry = useCallback((entry: Entry, driver: Driver) =>
     entry.pricing ? entry.pricing.kilometer[driver.id] ?? 0 : drivers.length === 1 ? settings.singleDriverKilometerRate : driverRateForEntry(entry, driver, rates),
   [drivers.length, rates, settings.singleDriverKilometerRate]);
-
-  const flushSave = useCallback(async () => {
-    if (savingRef.current) {
-      pendingSaveRef.current = true;
-      return;
-    }
-
-    savingRef.current = true;
-    let didSave = false;
-    try {
-      do {
-        pendingSaveRef.current = false;
-        const latest = latestDocumentRef.current;
-        if (!latest || latest.serialized === lastSavedRef.current) continue;
-
-        setSyncState("saving");
-        toast.loading("Запазване на промените…", { id: SYNC_TOAST_ID });
-        const response = await fetch("/api/ledger", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            document: latest.document,
-            expectedRevision: revisionRef.current,
-          }),
-        });
-
-        if (response.status === 401) {
-          toast.error("Сесията е изтекла. Влезте отново.", { id: SYNC_TOAST_ID });
-          router.replace("/login");
-          router.refresh();
-          return;
-        }
-        if (response.status === 409) {
-          setSyncState("error");
-          toast.error("Данните са променени на друго устройство. Страницата ще бъде обновена.", { id: SYNC_TOAST_ID });
-          window.setTimeout(() => window.location.reload(), 1200);
-          return;
-        }
-        if (!response.ok) {
-          const result = await response.json().catch(() => null) as { error?: string } | null;
-          throw new Error(result?.error || "Промените не могат да бъдат записани.");
-        }
-
-        const result = await response.json() as { revision: number };
-        revisionRef.current = result.revision;
-        lastSavedRef.current = latest.serialized;
-        setSyncState("saved");
-        didSave = true;
-      } while (pendingSaveRef.current);
-
-      if (didSave) {
-        toast.success("Промените са запазени.", { id: SYNC_TOAST_ID, duration: 1800 });
-      }
-    } catch (error) {
-      setSyncState("error");
-      toast.error(error instanceof Error ? error.message : "Промените не могат да бъдат записани.", {
-        id: SYNC_TOAST_ID,
-        duration: 5000,
-      });
-    } finally {
-      savingRef.current = false;
-    }
-  }, [router]);
-
-  useEffect(() => {
-    let active = true;
-    const load = async () => {
-      toast.loading("Зареждане на данните…", { id: LOAD_TOAST_ID });
-      try {
-        const response = await fetch("/api/ledger", { cache: "no-store" });
-        if (response.status === 401) {
-          toast.error("Сесията е изтекла. Влезте отново.", { id: LOAD_TOAST_ID });
-          router.replace("/login");
-          router.refresh();
-          return;
-        }
-        if (!response.ok) throw new Error("Данните не могат да бъдат заредени.");
-
-        const result = await response.json() as {
-          document: {
-            drivers: Driver[];
-            entries: Entry[];
-            trips: BusinessTrip[];
-            settings: Settings;
-            rates: RateSettings;
-          };
-          revision: number;
-        };
-        if (!active) return;
-
-        const normalizedSettings = { ...initialSettings, ...result.document.settings };
-        const normalizedRates = migrateRates(result.document.rates);
-        const document = {
-          version: 10,
-          drivers: result.document.drivers,
-          entries: result.document.entries.map((entry) => ({ ...entry, helperCount: entry.helperCount ?? 0, pricing: entry.pricing ?? captureEntryPricing(entry.rateItemId, result.document.drivers, normalizedRates, { ...normalizedSettings, vehicleClass: entry.vehicleClass || "up-to-8-8" }) })),
-          trips: result.document.trips.map((trip) => ({ ...trip, pricing: trip.pricing ?? captureTripPricing(result.document.drivers, normalizedRates, normalizedSettings) })),
-          settings: normalizedSettings,
-          rates: normalizedRates,
-        };
-        setDrivers(document.drivers);
-        setEntries(document.entries);
-        setTrips(document.trips);
-        setSettings(normalizedSettings);
-        setRates(normalizedRates);
-        revisionRef.current = result.revision;
-        lastSavedRef.current = JSON.stringify(document);
-        setSyncState("saved");
-        setHydrated(true);
-        toast.success("Данните са заредени.", { id: LOAD_TOAST_ID, duration: 1800 });
-      } catch (error) {
-        if (!active) return;
-        setSyncState("error");
-        toast.error(error instanceof Error ? error.message : "Данните не могат да бъдат заредени.", {
-          id: LOAD_TOAST_ID,
-        });
-      }
-    };
-
-    void load();
-    return () => { active = false; };
-  }, [router]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    const document = { version: 10, drivers, entries, trips, settings, rates };
-    const serialized = JSON.stringify(document);
-    latestDocumentRef.current = { document, serialized };
-    if (serialized === lastSavedRef.current) return;
-
-    const timer = window.setTimeout(() => void flushSave(), 700);
-    return () => window.clearTimeout(timer);
-  }, [hydrated, drivers, entries, trips, settings, rates, flushSave]);
 
   const selectedTrip = trips.find((trip) => trip.id === selectedTripId);
   const unassignedEntries = entries.filter((entry) => !trips.some((trip) => trip.id === entry.tripId));
@@ -629,11 +529,16 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   };
 
   const signOut = async () => {
+    if (!sync.canLeave()) {
+      toast.error("Имате незапазени промени или отворена форма. Запазете ги или приключете редакцията преди изход.");
+      return;
+    }
     setSigningOut(true);
     toast.loading("Излизане от профила…", { id: SIGN_OUT_TOAST_ID });
     try {
       const response = await fetch("/auth/signout", { method: "POST" });
       if (!response.ok) throw new Error("Изходът не може да бъде завършен.");
+      sync.clearDraft();
       toast.success("Излязохте от профила.", { id: SIGN_OUT_TOAST_ID });
       router.replace("/login");
       router.refresh();
@@ -762,6 +667,21 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         </nav>
 
         <div className="content-wrap">
+          <div className={`ledger-sync-bar ${syncState}`} role="status" aria-live="polite">
+            <span>{syncLabel}{hydrated && syncState === "saved" ? (sync.live ? " · Обновяване на живо" : " · Обновяване на живо: свързване…") : ""}</span>
+            {(syncState === "error" || syncState === "offline") && <Button size="sm" variant="outline" onClick={sync.retry}>Опитай отново</Button>}
+            {syncState === "conflict" && <Button size="sm" variant="outline" onClick={() => setReviewSync(v => !v)}>Преглед на промените</Button>}
+          </div>
+          {sync.view.message && <p className="sync-explanation">{sync.view.message}</p>}
+          {sync.view.remotePending && formPage && <p className="sync-explanation">Има нови данни от друго устройство. Формата ви е запазена. Ще ги проверим след приключване на редакцията.</p>}
+          {sync.storageError && <p className="sync-explanation" role="alert">Браузърът не позволява запазване на чернова. Не затваряйте раздела преди успешен запис. <Button variant="outline" size="sm" onClick={sync.downloadDraft}>Изтегли черновата</Button></p>}
+          {syncState === "conflict" && reviewSync && <section className="sync-review" aria-label="Преглед на конфликтите">
+            <h2>Промени от две устройства</h2>
+            <p>Различните записи се обединяват автоматично. За изброените по-долу има две версии. Изборът важи само за конфликтите; останалите промени се запазват. При изтриване се избира цялата свързана група записи.</p>
+            {sync.view.conflicts.map(conflict => <details key={conflict.path}><summary>{syncSectionLabels[conflict.path.split("/")[0]] || conflict.path}</summary><div className="sync-versions"><div><h3>Моите промени</h3><pre>{JSON.stringify(conflict.local ?? "Изтрит запис", null, 2)}</pre></div><div><h3>Сървърна версия</h3><pre>{JSON.stringify(conflict.remote ?? "Изтрит запис", null, 2)}</pre></div></div></details>)}
+            <p>Преди избор можете да изтеглите двете версии като резервно копие.</p>
+            <div className="sync-actions"><Button variant="outline" onClick={sync.downloadDraft}>Изтегли черновата</Button><Button variant="outline" disabled={!!formPage} onClick={() => { if (window.confirm("Да използваме сървърните версии само за конфликтите? Останалите ваши промени ще се запазят.")) sync.resolve("remote"); }}>Използвай сървърните версии</Button><Button disabled={!!formPage} onClick={() => { if (window.confirm("Да заменим конфликтните версии на сървъра с вашите? Прегледайте и изтеглете резервно копие преди потвърждение.")) sync.resolve("local"); }}>Използвай моите версии</Button></div>
+          </section>}
           {formPage ? formPageContent : <>
           <TabsContent value="overview" className="space-y-6">
             {reportDriver ? <>
@@ -821,7 +741,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
               {!trips.length && <Card className="panel"><CardContent className="empty-state"><BriefcaseBusiness /><h2>Първо създайте командировка</h2><p>Нужни са пореден номер и дата на тръгване. Километрите може да добавите по-късно.</p><Button className="mt-5" onClick={openNewTrip}><Plus /> Създай командировка</Button></CardContent></Card>}
               <p className={`local-data-note sync-note ${syncState}`}>
                 {syncState === "saving" ? <LoaderCircle className="auth-spinner" /> : syncState === "error" ? <CloudOff /> : <Cloud />}
-                {syncState === "loading" ? "Зареждане на защитените данни…" : syncState === "saving" ? "Запазване…" : syncState === "error" ? "Промените не са синхронизирани." : "Синхронизирано със защитената база данни."}
+                {syncLabel}
               </p>
             </> : <>
             <Button variant="ghost" className="trip-back" onClick={() => openTrip(null)}><ArrowLeft /> Всички командировки</Button>
@@ -910,7 +830,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
               <Button type="button" variant="ghost" className="trip-back" onClick={() => openSettingsPage(null)}><ArrowLeft /> Назад към настройките</Button>
               <div className="page-heading"><div><p className="eyebrow">Настройки</p><h1 id="settings-detail-title">{settingsPage === "profile" ? "Профил" : settingsPage === "vehicle" ? "Превозно средство" : "Шофьори"}</h1><p>{settingsPage === "profile" ? "Вашият профил и настройки на отчета." : settingsPage === "vehicle" ? "Данни за превозното средство. Промените в категорията важат за нови командировки." : "Управлявайте екипа и ставката при един шофьор."}</p></div>{settingsPage === "drivers" && <Button onClick={addDriver}><UserPlus /> Добави шофьор</Button>}</div>
               {settingsPage === "profile" && <Card className="panel settings-card"><CardContent className="panel-content settings-content">
-                <div className="settings-section"><div className="settings-icon"><Cloud /></div><div className="settings-fields"><h2>Профил и синхронизация</h2><p>Влезли сте като <strong>{userEmail}</strong>. Данните са достъпни само за членовете на вашата организация.</p><div className={`account-sync-status ${syncState}`}>{syncState === "saving" ? <LoaderCircle className="auth-spinner" /> : syncState === "error" ? <CloudOff /> : <Cloud />}<span>{syncState === "loading" ? "Зареждане…" : syncState === "saving" ? "Запазване на промените…" : syncState === "error" ? "Грешка при синхронизацията" : "Всички промени са записани"}</span></div></div></div>
+                <div className="settings-section"><div className="settings-icon"><Cloud /></div><div className="settings-fields"><h2>Профил и синхронизация</h2><p>Влезли сте като <strong>{userEmail}</strong>. Данните са достъпни само за членовете на вашата организация.</p><div className={`account-sync-status ${syncState}`}>{syncState === "saving" ? <LoaderCircle className="auth-spinner" /> : syncState === "error" ? <CloudOff /> : <Cloud />}<span>{syncLabel}</span></div></div></div>
                 <div className="settings-divider" />
                 <div className="settings-section"><div className="settings-icon"><FileText /></div><div className="settings-fields"><h2>Отчет</h2><p>Име, което се показва в приложението.</p><div className="field"><Label htmlFor="report-name">Име на отчета</Label><Input id="report-name" value={settings.company} onChange={(event) => setSettings((current) => ({ ...current, company: event.target.value }))} /></div></div></div>
                 <div className="settings-divider" />

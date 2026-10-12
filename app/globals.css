@@ -135,6 +135,18 @@ button, input { font: inherit; }
 .sync-note { display: flex; align-items: center; gap: 8px; }
 .sync-note svg { width: 16px; height: 16px; flex-shrink: 0; }
 .sync-note.error { color: #a33a35; }
+.ledger-sync-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 10px 14px; margin-bottom: 18px; border-radius: 12px; background: #eaf8f1; color: #26664f; font-size: .82rem; }
+.ledger-sync-bar.error, .ledger-sync-bar.conflict, .ledger-sync-bar.offline { color: #914725; background: #fff2e6; }
+.sync-explanation { margin: 0 0 16px; font-size: .9rem; overflow-wrap: anywhere; }
+.sync-review { padding: 20px; margin-bottom: 24px; border: 1px solid #d5e3dc; border-radius: 16px; background: white; min-width: 0; }
+.sync-review p { margin: 12px 0; }
+.sync-review summary { padding: 12px 0; cursor: pointer; font-weight: 650; }
+.sync-versions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.sync-versions > div { min-width: 0; }
+.sync-versions pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; font-size: .75rem; padding: 12px; background: #f3f7f5; }
+.sync-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.sync-actions button { white-space: normal; height: auto; min-height: 42px; }
+@media (max-width: 640px) { .sync-versions { grid-template-columns: minmax(0, 1fr); } .sync-actions { flex-direction: column; } }
 .form-error { margin: 0; color: #b42318; font-size: .875rem; }
 .entry-trip-context { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid #bcdcca; border-radius: 12px; background: #effbf5; font-weight: 650; }
 .entry-trip-context small { display: block; margin-top: 3px; color: #61766b; font-size: .875rem; font-weight: 400; }
