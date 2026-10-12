@@ -27,6 +27,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
+import { splitServiceEarnings } from "@/lib/service-split";
 import { useRouter } from "next/navigation";
 import { captureTripPricing, captureEntryPricing, serviceAmount, tripDriverAmounts, type TripPricing, type EntryPricing } from "@/lib/rate-snapshots";
 
@@ -92,6 +93,7 @@ type Entry = {
   vehicleClass?: VehicleClass;
   rateItemId?: string;
   quantity?: number;
+  helperCount?: number;
   driverIds: string[];
 };
 type Settings = { vehicle: string; vehicleClass: VehicleClass; currency: string; company: string; singleDriverKilometerRate: number };
@@ -177,6 +179,7 @@ const emptyEntry = (): Entry => ({
   vehicleClass: "up-to-8-8",
   rateItemId: "none",
   quantity: 0,
+  helperCount: 0,
   driverIds: [],
 });
 
@@ -209,8 +212,7 @@ const driverRateForClass = (vehicleClass: VehicleClass, driver: Driver, rates: R
 
 const entryForDriver = (entry: Entry, driver: Driver, rates: RateSettings) => {
   if (!entry.driverIds.includes(driver.id)) return 0;
-  const split = Math.max(entry.driverIds.length, 1);
-  return workForEntry(entry, rates) / split;
+  return splitServiceEarnings(workForEntry(entry, rates), entry.driverIds, entry.helperCount ?? 0).drivers[driver.id] ?? 0;
 };
 
 const legacyRateSources: Record<string, string> = {
@@ -268,6 +270,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   const [settingsPage, setSettingsPage] = useState<"profile" | "vehicle" | "drivers" | null>(null);
   const [editingEntry, setEditingEntry] = useState<Entry>(emptyEntry());
   const [quantityInput, setQuantityInput] = useState("");
+  const [helpersEnabled, setHelpersEnabled] = useState(false);
   const [search, setSearch] = useState("");
   const [reportTripId, setReportTripId] = useState("");
   const [reportDriverId, setReportDriverId] = useState<string | null>(null);
@@ -380,9 +383,9 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         const normalizedSettings = { ...initialSettings, ...result.document.settings };
         const normalizedRates = migrateRates(result.document.rates);
         const document = {
-          version: 9,
+          version: 10,
           drivers: result.document.drivers,
-          entries: result.document.entries.map((entry) => ({ ...entry, pricing: entry.pricing ?? captureEntryPricing(entry.rateItemId, result.document.drivers, normalizedRates, { ...normalizedSettings, vehicleClass: entry.vehicleClass || "up-to-8-8" }) })),
+          entries: result.document.entries.map((entry) => ({ ...entry, helperCount: entry.helperCount ?? 0, pricing: entry.pricing ?? captureEntryPricing(entry.rateItemId, result.document.drivers, normalizedRates, { ...normalizedSettings, vehicleClass: entry.vehicleClass || "up-to-8-8" }) })),
           trips: result.document.trips.map((trip) => ({ ...trip, pricing: trip.pricing ?? captureTripPricing(result.document.drivers, normalizedRates, normalizedSettings) })),
           settings: normalizedSettings,
           rates: normalizedRates,
@@ -412,7 +415,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    const document = { version: 9, drivers, entries, trips, settings, rates };
+    const document = { version: 10, drivers, entries, trips, settings, rates };
     const serialized = JSON.stringify(document);
     latestDocumentRef.current = { document, serialized };
     if (serialized === lastSavedRef.current) return;
@@ -513,12 +516,14 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
       return;
     }
     setEditingEntry({ ...emptyEntry(), tripId: selectedTrip.id, driverIds: drivers.map((driver) => driver.id) });
+    setHelpersEnabled(false);
     setQuantityInput("");
     setFormPage("entry");
   };
 
   const openEditEntry = (entry: Entry) => {
-    setEditingEntry({ ...entry });
+    setEditingEntry({ ...entry, helperCount: entry.helperCount ?? 0 });
+    setHelpersEnabled((entry.helperCount ?? 0) > 0);
     setQuantityInput(entry.quantity ? String(entry.quantity) : "");
     setFormPage("entry");
   };
@@ -561,10 +566,14 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
       return;
     }
     const isEditing = Boolean(editingEntry.id);
+    if (helpersEnabled && service && (!Number.isSafeInteger(editingEntry.helperCount) || (editingEntry.helperCount ?? 0) < 1 || (editingEntry.helperCount ?? 0) > 1000)) {
+      toast.error("Въведете цял брой помощници от 1 до 1000.");
+      return;
+    }
     const existing = entries.find((entry) => entry.id === editingEntry.id);
     const pricing = existing && existing.rateItemId === editingEntry.rateItemId && existing.pricing
       ? existing.pricing : captureEntryPricing(editingEntry.rateItemId, drivers, rates, { ...settings, vehicleClass: editingEntry.vehicleClass || "up-to-8-8" });
-    const normalized = { ...editingEntry, pricing, driverIds: existing?.driverIds ?? drivers.map((driver) => driver.id), documentNo: editingEntry.documentNo.trim().toUpperCase(), date: trip.departureDate, kilometers: 0, activity: service?.label || "", quantity: service ? editingEntry.quantity : 0, workAmount: 0 };
+    const normalized = { ...editingEntry, pricing, helperCount: service && helpersEnabled ? editingEntry.helperCount ?? 0 : 0, driverIds: existing?.driverIds ?? drivers.map((driver) => driver.id), documentNo: editingEntry.documentNo.trim().toUpperCase(), date: trip.departureDate, kilometers: 0, activity: service?.label || "", quantity: service ? editingEntry.quantity : 0, workAmount: 0 };
     const saved = isEditing ? normalized : { ...normalized, id: `entry-${Date.now()}` };
     setEntries((current) =>
       isEditing
@@ -685,6 +694,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
     ? savedEntry.pricing : captureEntryPricing(editingEntry.rateItemId, drivers, rates, { ...settings, vehicleClass: editingEntry.vehicleClass || "up-to-8-8" });
   const selectedRateItem = editingPricing.service ? { ...editingPricing.service, minimumApplies: editingPricing.service.minimum > 0 } : undefined;
   const editingWorkAmount = workForEntry({ ...editingEntry, pricing: editingPricing }, rates);
+  const editingHelperTotal = splitServiceEarnings(editingWorkAmount, editingEntry.driverIds, editingEntry.helperCount ?? 0).helpersTotal;
   const formPageContent = formPage === "trip" ? (
     <section className="form-page" aria-labelledby="trip-form-title">
       <Button type="button" variant="ghost" className="trip-back" onClick={() => setFormPage(null)}><ArrowLeft /> Назад</Button>
@@ -706,9 +716,9 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         <form onSubmit={saveEntry} className="entry-form">
           {editingEntry.id ? <div className="field"><Label htmlFor="entry-trip">Командировка</Label><Select value={editingEntryTrip?.id || ""} onValueChange={(value) => setEditingEntry((current) => ({ ...current, tripId: value }))}><SelectTrigger id="entry-trip" className="w-full"><SelectValue /></SelectTrigger><SelectContent position="popper" align="start" className="form-select-content">{trips.map((trip) => <SelectItem key={trip.id} value={trip.id}>№ {trip.number} · {fullDate(trip.departureDate)}</SelectItem>)}</SelectContent></Select><p className="field-help">Командировката, към която принадлежи клиентът.</p></div> : <div className="entry-trip-context"><BriefcaseBusiness /><span>Командировка № {editingEntryTrip?.number}<small>Тръгване: {editingEntryTrip ? fullDate(editingEntryTrip.departureDate) : ""}</small></span></div>}
           <div className="form-grid two"><div className="field"><Label htmlFor="entry-document">Номер на файл</Label><Input id="entry-document" required value={editingEntry.documentNo} onChange={(event) => { const value = event.target.value.toUpperCase(); const suffix = value.replace(/^SEE?-?/i, ""); setEditingEntry((current) => ({ ...current, documentNo: value ? `SEE-${suffix}` : "" })); }} /><p className="field-help">Номерът винаги започва с SEE-.</p></div><div className="field"><Label htmlFor="entry-client">Име на клиент</Label><Input id="entry-client" required value={editingEntry.client} onChange={(event) => setEditingEntry((current) => ({ ...current, client: event.target.value }))} /><p className="field-help">Име на лице или фирма.</p></div></div>
-          <div className="activity-calculator"><div className="field"><Label htmlFor="entry-service">Услуга</Label><Select value={editingEntry.rateItemId || "none"} onValueChange={(value) => { setQuantityInput(""); setEditingEntry((current) => ({ ...current, rateItemId: value, quantity: 0, activity: rates.activities.find((item) => item.id === value)?.label || "" })); }}><SelectTrigger id="entry-service" className="w-full"><SelectValue /></SelectTrigger><SelectContent position="popper" align="start" className="form-select-content"><SelectItem value="none">Без добавена услуга</SelectItem>{rates.activities.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent></Select><p className="field-help">Незадължително. Може да запазите клиента и да добавите услуга по-късно. Запазената услуга запазва своята ставка.</p></div>{selectedRateItem && <><div className="field"><Label htmlFor="entry-quantity">Количество ({unitLabel(selectedRateItem.unit)})</Label><Input id="entry-quantity" type="text" inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" required value={quantityInput} onChange={(event) => { const value = event.target.value; if (!/^\d*(?:\.\d{0,2})?$/.test(value)) return; setQuantityInput(value); setEditingEntry((current) => ({ ...current, quantity: Number(value) || 0 })); }} /><p className="field-help">Можете да използвате десетична точка, например 1.25.</p></div><div className="calculated-work"><span>Стойност на услугата</span><strong>{money(editingWorkAmount, settings.currency)}</strong><small>{number(editingEntry.quantity || 0, 2)} {unitLabel(selectedRateItem.unit)} × {money(selectedRateItem.rate, settings.currency)}{selectedRateItem.minimumApplies && editingWorkAmount === selectedRateItem.minimum ? ` · приложен минимум ${money(selectedRateItem.minimum, settings.currency)}` : ""}</small></div></>}</div>
+          <div className="activity-calculator"><div className="field"><Label htmlFor="entry-service">Услуга</Label><Select value={editingEntry.rateItemId || "none"} onValueChange={(value) => { setQuantityInput(""); if (value === "none") setHelpersEnabled(false); setEditingEntry((current) => ({ ...current, rateItemId: value, quantity: 0, helperCount: value === "none" ? 0 : current.helperCount ?? 0, activity: rates.activities.find((item) => item.id === value)?.label || "" })); }}><SelectTrigger id="entry-service" className="w-full"><SelectValue /></SelectTrigger><SelectContent position="popper" align="start" className="form-select-content"><SelectItem value="none">Без добавена услуга</SelectItem>{rates.activities.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent></Select><p className="field-help">Незадължително. Може да запазите клиента и да добавите услуга по-късно. Запазената услуга запазва своята ставка.</p></div>{selectedRateItem && <><div className="field"><Label htmlFor="entry-quantity">Количество ({unitLabel(selectedRateItem.unit)})</Label><Input id="entry-quantity" type="text" inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" required value={quantityInput} onChange={(event) => { const value = event.target.value; if (!/^\d*(?:\.\d{0,2})?$/.test(value)) return; setQuantityInput(value); setEditingEntry((current) => ({ ...current, quantity: Number(value) || 0 })); }} /><p className="field-help">Можете да използвате десетична точка, например 1.25.</p></div><div className="service-helpers"><label className="helpers-toggle" htmlFor="entry-helpers-enabled"><input id="entry-helpers-enabled" type="checkbox" checked={helpersEnabled} aria-controls="entry-helper-fields" aria-expanded={helpersEnabled} onChange={(event) => { setHelpersEnabled(event.target.checked); setEditingEntry((current) => ({ ...current, helperCount: 0 })); }} /><span>Добави помощници</span></label>{helpersEnabled && <div className="field" id="entry-helper-fields"><Label htmlFor="entry-helper-count">Брой помощници</Label><Input id="entry-helper-count" type="text" inputMode="numeric" pattern="[0-9]+" required value={editingEntry.helperCount || ""} aria-describedby="entry-helper-help" onChange={(event) => { const value = event.target.value; if (!/^\d*$/.test(value) || Number(value) > 1000) return; setEditingEntry((current) => ({ ...current, helperCount: Number(value) || 0 })); }} /><p className="field-help" id="entry-helper-help">Въведете цял брой от 1 до 1000. Само стойността на тази услуга се разделя между шофьорите и помощниците. Остатъчните стотинки се разпределят по ред: шофьори, след това помощници.</p></div>}</div><div className="calculated-work"><span>Стойност на услугата</span><strong>{money(editingWorkAmount, settings.currency)}</strong><small>{number(editingEntry.quantity || 0, 2)} {unitLabel(selectedRateItem.unit)} × {money(selectedRateItem.rate, settings.currency)}{selectedRateItem.minimumApplies && editingWorkAmount === selectedRateItem.minimum ? ` · приложен минимум ${money(selectedRateItem.minimum, settings.currency)}` : ""}</small></div></>}</div>
           <div className="field"><Label htmlFor="entry-note">Бележка</Label><Input id="entry-note" value={editingEntry.reference} onChange={(event) => setEditingEntry((current) => ({ ...current, reference: event.target.value }))} /><p className="field-help">Незадължителна допълнителна информация.</p></div>
-          <div className="live-calculation"><div><span>Труд за клиента</span><strong>{money(editingWorkAmount, settings.currency)}</strong></div><div className="calculation-split">{drivers.filter((driver) => editingEntry.driverIds.includes(driver.id)).map((driver) => <span key={driver.id}>{driver.name}: <b>{money(entryForDriver({ ...editingEntry, pricing: editingPricing }, driver, rates), settings.currency)}</b></span>)}</div></div>
+          <div className="live-calculation"><div><span>Труд за клиента</span><strong>{money(editingWorkAmount, settings.currency)}</strong></div><div className="calculation-split">{drivers.filter((driver) => editingEntry.driverIds.includes(driver.id)).map((driver) => <span key={driver.id}>{driver.name}: <b>{money(entryForDriver({ ...editingEntry, pricing: editingPricing }, driver, rates), settings.currency)}</b></span>)}{(editingEntry.helperCount ?? 0) > 0 && <span>Помощници ({editingEntry.helperCount}), общо: <b>{money(editingHelperTotal, settings.currency)}</b></span>}</div></div>
           <div className={`form-page-actions ${editingEntry.id ? "with-delete" : ""}`}>
             {editingEntry.id && <AlertDialog><AlertDialogTrigger asChild><Button type="button" variant="outline" className="delete-action"><Trash2 /> Изтрий клиента</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Изтриване на клиента?</AlertDialogTitle><AlertDialogDescription>Клиентът и изчислената за него сума ще бъдат премахнати от командировката.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Отказ</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => deleteEntry(editingEntry.id)}>Изтрий клиента</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
             <Button type="button" variant="outline" onClick={() => setFormPage(null)}>Отказ</Button><Button type="submit">{editingEntry.id ? "Запази промените" : "Добави клиента"}</Button>
@@ -835,7 +845,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
                         <TableRow key={entry.id}>
                           <TableCell><div className="table-primary">{entry.documentNo}</div><div className="table-secondary">Командировка № {selectedTrip?.number}</div></TableCell>
                           <TableCell><div className="table-primary">{entry.client || "-"}</div></TableCell>
-                          <TableCell><div className="table-primary">{entry.pricing?.service?.label || entry.activity || "Без добавена услуга"}</div></TableCell>
+                          <TableCell><div className="table-primary">{entry.pricing?.service?.label || entry.activity || "Без добавена услуга"}</div>{(entry.helperCount ?? 0) > 0 && <div className="table-secondary">Помощници: {entry.helperCount}</div>}</TableCell>
                           <TableCell className="text-right table-primary">{entry.quantity ? `${number(entry.quantity, 2)} ${unitLabel(entry.pricing?.service?.unit || "m3")}` : "-"}</TableCell>
                           {drivers.map((driver) => <TableCell key={driver.id} className="text-right table-primary">{entry.driverIds.includes(driver.id) ? money(entryForDriver(entry, driver, rates), settings.currency) : "-"}</TableCell>)}
                           <TableCell>
@@ -858,7 +868,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
                     <button className="mobile-entry-card" key={entry.id} onClick={() => openEditEntry(entry)}>
                       <span className="mobile-entry-top"><span>{entry.documentNo}</span><Badge variant="secondary">{entry.quantity ? `${number(entry.quantity, 2)} ${unitLabel(entry.pricing?.service?.unit || "m3")}` : "Без услуга"}</Badge></span>
                       <strong>{entry.client || "Без клиент"}</strong>
-                      <small>{entry.pricing?.service?.label || entry.activity || "Без добавена услуга"}</small>
+                      <small>{entry.pricing?.service?.label || entry.activity || "Без добавена услуга"}{(entry.helperCount ?? 0) > 0 ? ` · Помощници: ${entry.helperCount}` : ""}</small>
                       <span className="mobile-entry-bottom"><span>Труд общо</span><b>{money(workForEntry(entry, rates), settings.currency)}</b></span>
                     </button>
                   ))}

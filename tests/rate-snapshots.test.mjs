@@ -52,14 +52,15 @@ test('new single-driver trips keep their combined kilometre rate', () => {
 });
 test('client without service validates, earns zero, then can receive a service', () => {
   const draft = { ...entry, rateItemId: 'none', quantity: 0, pricing: captureEntryPricing('none', drivers, rates, settings) };
-  const document = ledgerDocumentSchema.parse({ version: 9, drivers, trips: [trip], entries: [draft], settings, rates });
+  const document = ledgerDocumentSchema.parse({ version: 10, drivers, trips: [trip], entries: [draft], settings, rates });
   assert.equal(document.entries[0].pricing.service, null);
   assert.equal(serviceAmount(draft, laterRates), 0);
   assert.equal(serviceAmount({ ...draft, rateItemId: 'load', quantity: 10, pricing: captureEntryPricing('load', drivers, laterRates, settings) }, laterRates), 110);
 });
 test('API schema preserves snapshot fields and rejects obsolete documents', () => {
-  const document = { version: 9, drivers, trips: [trip], entries: [entry], settings, rates };
+  const document = { version: 10, drivers, trips: [trip], entries: [entry], settings, rates };
   assert.deepEqual(ledgerDocumentSchema.parse(document).trips[0].pricing, trip.pricing);
   assert.deepEqual(ledgerDocumentSchema.parse(document).entries[0].pricing, entry.pricing);
   assert.equal(ledgerDocumentSchema.safeParse({ ...document, version: 8 }).success, false);
+  assert.equal(ledgerDocumentSchema.safeParse({ ...document, version: 9 }).success, false);
 });

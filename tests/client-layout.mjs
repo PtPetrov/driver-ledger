@@ -25,7 +25,7 @@ await server.listen();
 const service = { id: "commercial-loading", label: "Товарене на търговски пратки (линеен метър)", unit: "linear_m", rate: 5 };
 const kilometer = { ni: .09, di: .08 };
 const document = {
-  version: 9,
+  version: 10,
   drivers: [{ id: "ni", name: "NI", rate: .09, level: "senior", color: "#62e6a7" }, { id: "di", name: "DI", rate: .08, level: "junior", color: "#ffb86b" }],
   trips: [{ id: "trip", number: "1919", departureDate: "2026-10-04", totalKilometers: 4854, restDays: 0, pricing: { kilometer, restPerDay: 70 } }],
   entries: [{ id: "client", tripId: "trip", date: "2026-10-04", documentNo: "SEE-TEST", client: "Test client with a long name", direction: "outbound", reference: "", country: "BG", kilometers: 0, workAmount: 0, activity: service.label, rateItemId: service.id, quantity: 5, driverIds: ["ni", "di"], vehicleClass: "up-to-8-8", pricing: { service: { ...service, minimum: 0 }, kilometer } }],
@@ -62,6 +62,15 @@ try {
           await page.getByRole("menuitem", { name: /Редактирай/ }).click();
         }
         await page.getByRole("heading", { name: "Редакция на клиент" }).waitFor();
+        const helpers = page.getByRole("checkbox", { name: "Добави помощници" });
+        assert.equal(await helpers.isChecked(), false);
+        assert.equal(await page.locator("#entry-helper-count").count(), 0);
+        await helpers.check();
+        await page.getByLabel("Брой помощници", { exact: true }).fill("2");
+        assert.ok(await page.locator(".calculation-split").getByText("Помощници (2), общо:", { exact: false }).isVisible());
+        await helpers.uncheck();
+        assert.equal(await page.locator("#entry-helper-count").count(), 0);
+        assert.equal(await page.locator(".calculation-split").getByText("Помощници (2), общо:", { exact: false }).count(), 0);
         const overflow = await page.locator(".form-page, .form-page *").evaluateAll(nodes => nodes.filter(node => {
           const box = node.getBoundingClientRect();
           return box.width > 0 && (box.right > innerWidth + 1 || box.left < -1);
