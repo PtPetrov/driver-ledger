@@ -397,7 +397,16 @@ button, input { font: inherit; }
 .currency-select { min-width: 190px; }
 .danger-section .settings-icon { color: #8d5c34; background: #fff2e7; }
 
-.form-page { display: grid; gap: 20px; width: min(100%, 760px); margin: 0 auto; }
+.form-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; width: min(100%, 760px); min-width: 0; margin: 0 auto; }
+.form-page > .trip-back { justify-self: start; }
+/* Grid items default to min-width:auto: a long select label must not widen the page. */
+.form-page :is(.form-page-card, .panel-content, .entry-form, .form-grid, .field, .activity-calculator) { min-width: 0; max-width: 100%; }
+.form-page :is(.field, .entry-form) { grid-template-columns: minmax(0, 1fr); }
+.form-page :is(.field-help, .calculation-split, .entry-trip-context) { overflow-wrap: anywhere; }
+.form-page [data-slot="select-trigger"] { width: 100%; min-width: 0; max-width: 100%; height: auto; min-height: 44px; text-align: left; white-space: normal; }
+.form-page [data-slot="select-value"] { display: block; flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; -webkit-line-clamp: unset; }
+.form-select-content { width: var(--radix-select-trigger-width); max-width: calc(100vw - 24px); }
+.form-select-content [data-slot="select-item"] { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .form-page-heading h1 { margin: 4px 0 7px; font-size: clamp(1.8rem, 4vw, 2.45rem); line-height: 1.08; letter-spacing: -0.04em; }
 .form-page-heading > p:last-child { max-width: 620px; margin: 0; color: #6d7e77; font-size: 0.95rem; line-height: 1.55; }
 .form-page-card .panel-content { padding: 28px; }
@@ -406,8 +415,8 @@ button, input { font: inherit; }
 .form-page-actions button { min-height: 44px; }
 .form-page-actions .delete-action { margin-right: auto; color: #a13f3f; border-color: #e8c6c6; }
 .form-grid { display: grid; gap: 13px; }
-.form-grid.two { grid-template-columns: repeat(2, 1fr); }
-.form-grid.three { grid-template-columns: repeat(3, 1fr); }
+.form-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .activity-calculator { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(120px, .65fr); gap: 13px; padding: 16px; border: 1px solid #dbe8e0; border-radius: 14px; background: #f7fbf9; }
 .activity-calculator > .field:only-child { grid-column: 1 / -1; }
 .calculated-work { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding-top: 13px; border-top: 1px dashed #d6e2db; }
@@ -653,8 +662,8 @@ button, input { font: inherit; }
   .form-page-heading > p:last-child { font-size: 0.9rem; }
   .form-page-card .panel-content { padding: 18px; }
   .entry-form { gap: 18px; }
-  .form-grid.two, .form-grid.three { grid-template-columns: 1fr; }
-  .activity-calculator { grid-template-columns: 1fr; padding: 14px; }
+  .form-grid.two, .form-grid.three { grid-template-columns: minmax(0, 1fr); }
+  .activity-calculator { grid-template-columns: minmax(0, 1fr); padding: 14px; }
   .calculated-work { flex-wrap: wrap; }
   .calculated-work strong { margin-left: auto; }
   .calculated-work small { flex-basis: 100%; }
