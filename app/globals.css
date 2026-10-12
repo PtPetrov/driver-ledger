@@ -434,9 +434,10 @@ button, input { font: inherit; }
 .form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .activity-calculator { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(120px, .65fr); gap: 13px; padding: 16px; border: 1px solid #dbe8e0; border-radius: 14px; background: #f7fbf9; }
 .activity-calculator > .field:only-child { grid-column: 1 / -1; }
-.service-helpers { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
-.helpers-toggle { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; color: #41554d; font-size: .875rem; font-weight: 700; }
-.helpers-toggle input { width: 20px; height: 20px; flex: 0 0 20px; accent-color: #153e32; }
+.service-helpers { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.service-helpers > .field { margin-top: 20px; }
+.helpers-toggle { display: flex; align-items: center; min-height: 44px; cursor: pointer; color: #41554d; font-size: .875rem; font-weight: 700; }
+.helpers-toggle input { width: 20px; height: 20px; flex: 0 0 20px; margin: 0 14px 0 0; accent-color: #153e32; }
 .helpers-toggle input:focus-visible { outline: 3px solid #2fba83; outline-offset: 3px; }
 .calculated-work { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding-top: 13px; border-top: 1px dashed #d6e2db; }
 .calculated-work span { color: #65786f; font-size: .82rem; }
