@@ -667,11 +667,11 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         </nav>
 
         <div className="content-wrap">
-          <div className={`ledger-sync-bar ${syncState}`} role="status" aria-live="polite">
-            <span>{syncLabel}{hydrated && syncState === "saved" ? (sync.live ? " · Обновяване на живо" : " · Обновяване на живо: свързване…") : ""}</span>
+          {syncState !== "saved" && <div className={`ledger-sync-bar ${syncState}`} role="status" aria-live="polite">
+            <span>{syncLabel}</span>
             {(syncState === "error" || syncState === "offline") && <Button size="sm" variant="outline" onClick={sync.retry}>Опитай отново</Button>}
             {syncState === "conflict" && <Button size="sm" variant="outline" onClick={() => setReviewSync(v => !v)}>Преглед на промените</Button>}
-          </div>
+          </div>}
           {sync.view.message && <p className="sync-explanation">{sync.view.message}</p>}
           {sync.view.remotePending && formPage && <p className="sync-explanation">Има нови данни от друго устройство. Формата ви е запазена. Ще ги проверим след приключване на редакцията.</p>}
           {sync.storageError && <p className="sync-explanation" role="alert">Браузърът не позволява запазване на чернова. Не затваряйте раздела преди успешен запис. <Button variant="outline" size="sm" onClick={sync.downloadDraft}>Изтегли черновата</Button></p>}
@@ -739,10 +739,10 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
                 })}
               </div>
               {!trips.length && <Card className="panel"><CardContent className="empty-state"><BriefcaseBusiness /><h2>Първо създайте командировка</h2><p>Нужни са пореден номер и дата на тръгване. Километрите може да добавите по-късно.</p><Button className="mt-5" onClick={openNewTrip}><Plus /> Създай командировка</Button></CardContent></Card>}
-              <p className={`local-data-note sync-note ${syncState}`}>
+              {syncState !== "saved" && <p className={`local-data-note sync-note ${syncState}`}>
                 {syncState === "saving" ? <LoaderCircle className="auth-spinner" /> : syncState === "error" ? <CloudOff /> : <Cloud />}
                 {syncLabel}
-              </p>
+              </p>}
             </> : <>
             <Button variant="ghost" className="trip-back" onClick={() => openTrip(null)}><ArrowLeft /> Всички командировки</Button>
             <section className="page-heading">
@@ -830,7 +830,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
               <Button type="button" variant="ghost" className="trip-back" onClick={() => openSettingsPage(null)}><ArrowLeft /> Назад към настройките</Button>
               <div className="page-heading"><div><p className="eyebrow">Настройки</p><h1 id="settings-detail-title">{settingsPage === "profile" ? "Профил" : settingsPage === "vehicle" ? "Превозно средство" : "Шофьори"}</h1><p>{settingsPage === "profile" ? "Вашият профил и настройки на отчета." : settingsPage === "vehicle" ? "Данни за превозното средство. Промените в категорията важат за нови командировки." : "Управлявайте екипа и ставката при един шофьор."}</p></div>{settingsPage === "drivers" && <Button onClick={addDriver}><UserPlus /> Добави шофьор</Button>}</div>
               {settingsPage === "profile" && <Card className="panel settings-card"><CardContent className="panel-content settings-content">
-                <div className="settings-section"><div className="settings-icon"><Cloud /></div><div className="settings-fields"><h2>Профил и синхронизация</h2><p>Влезли сте като <strong>{userEmail}</strong>. Данните са достъпни само за членовете на вашата организация.</p><div className={`account-sync-status ${syncState}`}>{syncState === "saving" ? <LoaderCircle className="auth-spinner" /> : syncState === "error" ? <CloudOff /> : <Cloud />}<span>{syncLabel}</span></div></div></div>
+                <div className="settings-section"><div className="settings-icon"><Cloud /></div><div className="settings-fields"><h2>Профил и синхронизация</h2><p>Влезли сте като <strong>{userEmail}</strong>. Данните са достъпни само за членовете на вашата организация.</p>{syncState !== "saved" && <div className={`account-sync-status ${syncState}`}>{syncState === "saving" ? <LoaderCircle className="auth-spinner" /> : syncState === "error" ? <CloudOff /> : <Cloud />}<span>{syncLabel}</span></div>}</div></div>
                 <div className="settings-divider" />
                 <div className="settings-section"><div className="settings-icon"><FileText /></div><div className="settings-fields"><h2>Отчет</h2><p>Име, което се показва в приложението.</p><div className="field"><Label htmlFor="report-name">Име на отчета</Label><Input id="report-name" value={settings.company} onChange={(event) => setSettings((current) => ({ ...current, company: event.target.value }))} /></div></div></div>
                 <div className="settings-divider" />
