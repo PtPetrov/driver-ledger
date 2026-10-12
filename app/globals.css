@@ -385,17 +385,32 @@ button, input { font: inherit; }
 .rates-footer { display: grid; grid-template-columns: 220px 220px; gap: 14px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #e4eae6; }
 
 .settings-card { max-width: 900px; }
+.settings-pages { min-width: 0; }
+.settings-home, .settings-detail { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
+.settings-home { max-width: 760px; min-height: max(420px, calc(100dvh - 290px)); margin: 0 auto; grid-template-rows: auto auto 1fr; }
+.settings-menu { display: grid; gap: 14px; }
+.settings-menu-button { display: grid; grid-template-columns: 44px minmax(0, 1fr) 20px; align-items: center; gap: 16px; width: 100%; padding: 20px; text-align: left; color: #183b2f; background: #fff; border: 1px solid #d6e4dc; border-radius: 18px; cursor: pointer; }
+.settings-menu-button:hover { background: #f3fbf6; border-color: #2fba83; }
+.settings-menu-button:focus-visible { outline: 3px solid #2fba83; outline-offset: 3px; }
+.settings-menu-button > span:nth-child(2) { min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+.settings-menu-button small { display: block; margin-top: 4px; color: #6d7e77; font-size: .82rem; font-weight: 400; }
+.settings-menu-button > svg { width: 20px; }
+.settings-home-footer { align-self: end; padding-top: 24px; }
+.settings-home-footer button { width: 100%; min-height: 48px; }
+.settings-detail > .trip-back { justify-self: start; }
+.settings-detail :is(.settings-fields, .field, .settings-grid, .driver-card, .driver-edit-grid) { min-width: 0; }
+.settings-fields p, .settings-fields strong { overflow-wrap: anywhere; }
+.settings-detail .field { grid-template-columns: minmax(0, 1fr); }
 .settings-content { padding: 30px; }
-.settings-section { display: grid; grid-template-columns: 48px 1fr; align-items: start; gap: 18px; }
+.settings-section { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: start; gap: 18px; }
 .settings-icon { display: grid; place-items: center; width: 44px; height: 44px; color: #246f55; border-radius: 14px; background: #e8f7ef; }
 .settings-icon svg { width: 21px; }
 .settings-fields h2 { margin: 1px 0 4px; font-size: 1rem; }
 .settings-fields > p { margin: 0 0 19px; color: #75857f; font-size: 0.82rem; }
-.settings-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 14px; max-width: 630px; }
+.settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 14px; max-width: 630px; }
 .report-name-field { grid-column: 1 / -1; }
 .settings-divider { height: 1px; margin: 28px 0; background: #e6ebe8; }
 .currency-select { min-width: 190px; }
-.danger-section .settings-icon { color: #8d5c34; background: #fff2e7; }
 
 .form-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; width: min(100%, 760px); min-width: 0; margin: 0 auto; }
 .form-page > .trip-back { justify-self: start; }

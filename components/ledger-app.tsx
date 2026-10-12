@@ -265,6 +265,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   const [settings, setSettings] = useState<Settings>(initialSettings);
   const [rates, setRates] = useState<RateSettings>(initialRates);
   const [activeTab, setActiveTab] = useState("overview");
+  const [settingsPage, setSettingsPage] = useState<"profile" | "vehicle" | "drivers" | null>(null);
   const [editingEntry, setEditingEntry] = useState<Entry>(emptyEntry());
   const [quantityInput, setQuantityInput] = useState("");
   const [search, setSearch] = useState("");
@@ -613,14 +614,9 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
     toast.success("Шофьорът е премахнат.");
   };
 
-  const clearTripData = () => {
-    setEntries([]);
-    setTrips([]);
-    openTrip(null);
-    setReportTripId("");
-    setReportDriverId(null);
-    setFormPage(null);
-    toast.success("Всички командировки и клиенти са изтрити.");
+  const openSettingsPage = (page: "profile" | "vehicle" | "drivers" | null) => {
+    setSettingsPage(page);
+    window.scrollTo({ top: 0, behavior: "instant" });
   };
 
   const signOut = async () => {
@@ -745,13 +741,13 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         <Button className="primary-action" disabled={!hydrated} aria-label={activeTab === "trips" && selectedTrip ? "Нов клиент" : "Нова командировка"} onClick={activeTab === "trips" && selectedTrip ? openNewEntry : openNewTrip}><Plus /> <span>{activeTab === "trips" && selectedTrip ? "Нов клиент" : "Нова командировка"}</span></Button>
       </header>
 
-      <Tabs value={activeTab} onValueChange={(value) => { setFormPage(null); setActiveTab(value); }} className="app-tabs">
+      <Tabs value={activeTab} onValueChange={(value) => { setFormPage(null); setSettingsPage(null); setActiveTab(value); }} className="app-tabs">
         <nav className="nav-wrap" aria-label="Основна навигация">
           <TabsList variant="line" className="app-nav">
             <TabsTrigger value="overview"><CircleGauge /> Отчет</TabsTrigger>
             <TabsTrigger value="trips"><BriefcaseBusiness /> Командировки</TabsTrigger>
             <TabsTrigger value="rates"><Calculator /> Ставки</TabsTrigger>
-            <TabsTrigger value="settings"><Settings2 /> Настройки</TabsTrigger>
+            <TabsTrigger value="settings" onClick={() => { setFormPage(null); openSettingsPage(null); }}><Settings2 /> Настройки</TabsTrigger>
           </TabsList>
         </nav>
 
@@ -891,20 +887,33 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
             <Card className="panel rates-card"><CardContent className="panel-content"><div className="panel-heading"><div><p className="eyebrow">Одобрени дейности</p><h2>Труд и услуги</h2></div><PackageOpen /></div><div className="rates-list">{rates.activities.map((item) => <div className="rate-row" key={item.id}><div className="rate-row-copy"><strong>{item.label}</strong><small>{item.rate === 0 ? "Въведете одобрената стойност, за да се изчислява автоматично." : item.minimumApplies ? `Минимум ${money(rates.minimumBusiness, settings.currency)} при извършена дейност` : `Изчислява се на ${unitLabel(item.unit)}`}</small></div><div className="money-input rate-input"><Input aria-label={`Ставка за ${item.label}`} type="number" min="0" step="0.01" value={item.rate || ""} onChange={(event) => setRates((current) => ({ ...current, activities: current.activities.map((rate) => rate.id === item.id ? { ...rate, rate: Number(event.target.value) || 0 } : rate) }))} /><span>{item.unit === "linear_m" ? "€ л/м" : `€/${unitLabel(item.unit)}`}</span></div></div>)}</div><div className="rates-footer"><div className="field"><Label htmlFor="minimum-rate">Минимално заплащане</Label><div className="money-input"><Input id="minimum-rate" type="number" min="0" step="1" value={rates.minimumBusiness || ""} onChange={(event) => setRates((current) => ({ ...current, minimumBusiness: Number(event.target.value) || 0 }))} /><span>€</span></div></div><div className="field"><Label htmlFor="rates-date">В сила от</Label><Input id="rates-date" type="date" value={rates.effectiveDate} onChange={(event) => setRates((current) => ({ ...current, effectiveDate: event.target.value }))} /></div></div></CardContent></Card>
           </TabsContent>
 
-          <TabsContent value="settings" className="space-y-5">
-            <section className="page-heading"><div><p className="eyebrow">Конфигурация</p><h1>Настройки на отчета</h1><p>Основни данни за превозното средство, валутата и шофьорите.</p></div></section>
-            <Card className="panel settings-card">
-              <CardContent className="panel-content settings-content">
-                <div className="settings-section"><div className="settings-icon"><Truck /></div><div className="settings-fields"><h2>Превозно средство</h2><p>Категорията определя ставката на километър за всички командировки.</p><div className="settings-grid"><div className="field"><Label htmlFor="vehicle">Регистрационен номер</Label><Input id="vehicle" value={settings.vehicle} onChange={(event) => setSettings((current) => ({ ...current, vehicle: event.target.value.toUpperCase() }))} /></div><div className="field"><Label>Категория камион</Label><Select value={settings.vehicleClass} onValueChange={(value: VehicleClass) => setSettings((current) => ({ ...current, vehicleClass: value }))}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="up-to-8-8">До 8,8 тона</SelectItem><SelectItem value="up-to-11-99">До 11,99 тона</SelectItem></SelectContent></Select></div><div className="field report-name-field"><Label htmlFor="report-name">Име на отчета</Label><Input id="report-name" value={settings.company} onChange={(event) => setSettings((current) => ({ ...current, company: event.target.value }))} /></div><div className="field"><Label htmlFor="single-driver-rate">Ставка при един шофьор</Label><div className="money-input"><Input id="single-driver-rate" type="number" min="0" step="0.01" value={settings.singleDriverKilometerRate || ""} onChange={(event) => setSettings((current) => ({ ...current, singleDriverKilometerRate: Number(event.target.value) || 0 }))} /><span>€/км</span></div><p className="field-help">При само един шофьор той получава общата ставка за двама.</p></div></div></div></div>
+          <TabsContent value="settings" className="settings-pages">
+            {settingsPage === null ? <section className="settings-home" aria-labelledby="settings-title">
+              <div className="page-heading"><div><p className="eyebrow">Конфигурация</p><h1 id="settings-title">Настройки</h1><p>Изберете какво искате да промените.</p></div></div>
+              <div className="settings-menu">
+                <button type="button" className="settings-menu-button" onClick={() => openSettingsPage("profile")}><span className="settings-icon"><Cloud /></span><span>Профил<small>Профил, синхронизация и отчет</small></span><ChevronRight /></button>
+                <button type="button" className="settings-menu-button" onClick={() => openSettingsPage("vehicle")}><span className="settings-icon"><Truck /></span><span>Превозно средство<small>Регистрационен номер и категория</small></span><ChevronRight /></button>
+                <button type="button" className="settings-menu-button" onClick={() => openSettingsPage("drivers")}><span className="settings-icon"><Users /></span><span>Шофьори<small>Екип и ставка при един шофьор</small></span><ChevronRight /></button>
+              </div>
+              <footer className="settings-home-footer"><Button type="button" variant="outline" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? <LoaderCircle className="auth-spinner" /> : <LogOut />} Изход</Button></footer>
+            </section> : <section className="settings-detail" aria-labelledby="settings-detail-title">
+              <Button type="button" variant="ghost" className="trip-back" onClick={() => openSettingsPage(null)}><ArrowLeft /> Назад към настройките</Button>
+              <div className="page-heading"><div><p className="eyebrow">Настройки</p><h1 id="settings-detail-title">{settingsPage === "profile" ? "Профил" : settingsPage === "vehicle" ? "Превозно средство" : "Шофьори"}</h1><p>{settingsPage === "profile" ? "Вашият профил и настройки на отчета." : settingsPage === "vehicle" ? "Данни за превозното средство. Промените в категорията важат за нови командировки." : "Управлявайте екипа и ставката при един шофьор."}</p></div>{settingsPage === "drivers" && <Button onClick={addDriver}><UserPlus /> Добави шофьор</Button>}</div>
+              {settingsPage === "profile" && <Card className="panel settings-card"><CardContent className="panel-content settings-content">
+                <div className="settings-section"><div className="settings-icon"><Cloud /></div><div className="settings-fields"><h2>Профил и синхронизация</h2><p>Влезли сте като <strong>{userEmail}</strong>. Данните са достъпни само за членовете на вашата организация.</p><div className={`account-sync-status ${syncState}`}>{syncState === "saving" ? <LoaderCircle className="auth-spinner" /> : syncState === "error" ? <CloudOff /> : <Cloud />}<span>{syncState === "loading" ? "Зареждане…" : syncState === "saving" ? "Запазване на промените…" : syncState === "error" ? "Грешка при синхронизацията" : "Всички промени са записани"}</span></div></div></div>
                 <div className="settings-divider" />
-                <div className="settings-section"><div className="settings-icon"><WalletCards /></div><div className="settings-fields"><h2>Валута</h2><p>Използва се за всички суми и изчисления в приложението.</p><Select value={settings.currency} onValueChange={(value) => setSettings((current) => ({ ...current, currency: value }))}><SelectTrigger className="currency-select"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="EUR">EUR - Евро</SelectItem><SelectItem value="BGN">BGN - Български лев</SelectItem></SelectContent></Select></div></div>
+                <div className="settings-section"><div className="settings-icon"><FileText /></div><div className="settings-fields"><h2>Отчет</h2><p>Име, което се показва в приложението.</p><div className="field"><Label htmlFor="report-name">Име на отчета</Label><Input id="report-name" value={settings.company} onChange={(event) => setSettings((current) => ({ ...current, company: event.target.value }))} /></div></div></div>
                 <div className="settings-divider" />
-                <div className="settings-section"><div className="settings-icon"><Cloud /></div><div className="settings-fields"><h2>Профил и синхронизация</h2><p>Влезли сте като <strong>{userEmail}</strong>. Данните са достъпни само за членовете на вашата организация.</p><div className={`account-sync-status ${syncState}`}>{syncState === "saving" ? <LoaderCircle className="auth-spinner" /> : syncState === "error" ? <CloudOff /> : <Cloud />}<span>{syncState === "loading" ? "Зареждане…" : syncState === "saving" ? "Запазване на промените…" : syncState === "error" ? "Грешка при синхронизацията" : "Всички промени са записани"}</span></div><Button type="button" variant="outline" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? <LoaderCircle className="auth-spinner" /> : <LogOut />} Изход</Button></div></div>
-                <div className="settings-divider" />
-                <div className="settings-section danger-section"><div className="settings-icon"><Trash2 /></div><div className="settings-fields"><h2>Изтриване на данни</h2><p>Премахнете всички командировки и свързаните с тях клиенти. Шофьорите, ставките и настройките ще бъдат запазени.</p><AlertDialog><AlertDialogTrigger asChild><Button variant="outline" className="destructive-outline"><Trash2 /> Изтрий всички командировки и клиенти</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Изтриване на всички командировки и клиенти?</AlertDialogTitle><AlertDialogDescription>Всички командировки и клиенти в организацията ще бъдат изтрити от базата данни. Това действие не може да бъде отменено.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Отказ</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={clearTripData}>Изтрий всичко</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog></div></div>
-              </CardContent>
-            </Card>
-            <section className="page-heading settings-team-heading"><div><p className="eyebrow">Екип</p><h2>Шофьори</h2><p>Нивото на шофьора определя правилната ставка за избраната категория камион.</p></div><Button onClick={addDriver}><UserPlus /> Добави шофьор</Button></section>
+                <div className="settings-section"><div className="settings-icon"><WalletCards /></div><div className="settings-fields"><h2>Валута</h2><p>Използва се за всички суми и изчисления в приложението.</p><Select value={settings.currency} onValueChange={(value) => setSettings((current) => ({ ...current, currency: value }))}><SelectTrigger aria-label="Валута" className="currency-select"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="EUR">EUR - Евро</SelectItem><SelectItem value="BGN">BGN - Български лев</SelectItem></SelectContent></Select></div></div>
+              </CardContent></Card>}
+              {settingsPage === "vehicle" && <Card className="panel settings-card"><CardContent className="panel-content settings-content">
+                <div className="settings-section"><div className="settings-icon"><Truck /></div><div className="settings-fields"><h2>Данни за превозното средство</h2><p>Запазените командировки запазват своите ставки.</p><div className="settings-grid">
+                  <div className="field"><Label htmlFor="vehicle">Регистрационен номер</Label><Input id="vehicle" value={settings.vehicle} onChange={(event) => setSettings((current) => ({ ...current, vehicle: event.target.value.toUpperCase() }))} /></div>
+                  <div className="field"><Label htmlFor="vehicle-class">Категория камион</Label><Select value={settings.vehicleClass} onValueChange={(value: VehicleClass) => setSettings((current) => ({ ...current, vehicleClass: value }))}><SelectTrigger id="vehicle-class" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="up-to-8-8">До 8,8 тона</SelectItem><SelectItem value="up-to-11-99">До 11,99 тона</SelectItem></SelectContent></Select></div>
+                </div></div></div>
+              </CardContent></Card>}
+              {settingsPage === "drivers" && <>
+                <Card className="panel settings-card"><CardContent className="panel-content settings-content"><div className="field"><Label htmlFor="single-driver-rate">Ставка при един шофьор</Label><div className="money-input"><Input id="single-driver-rate" type="number" min="0" step="0.01" value={settings.singleDriverKilometerRate || ""} onChange={(event) => setSettings((current) => ({ ...current, singleDriverKilometerRate: Number(event.target.value) || 0 }))} /><span>€/км</span></div><p className="field-help">При само един шофьор той получава общата ставка за двама. Промените важат за нови командировки.</p></div></CardContent></Card>
             <div className="drivers-grid">
               {drivers.map((driver, index) => {
                 const total = totals.byDriver.find((item) => item.id === driver.id);
@@ -920,6 +929,8 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
                 );
               })}
             </div>
+              </>}
+            </section>}
           </TabsContent>
           </>}
         </div>

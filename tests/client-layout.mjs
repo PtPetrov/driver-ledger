@@ -41,6 +41,18 @@ try {
         const page = await browser.newPage({ viewport: { width, height: 900 } });
         await page.route("**/api/ledger", route => route.fulfill({ json: { document, revision: 1 } }));
         await page.goto("http://127.0.0.1:4178");
+        await page.getByRole("tab", { name: "Настройки", exact: true }).click();
+        assert.equal(await page.locator(".settings-menu-button").count(), 3);
+        assert.equal(await page.getByText("Изтриване на данни", { exact: true }).count(), 0);
+        assert.ok(await page.locator(".settings-home-footer").getByRole("button", { name: "Изход" }).isVisible());
+        for (const [section, field] of [["Профил", "#report-name"], ["Превозно средство", "#vehicle"], ["Шофьори", "#single-driver-rate"]]) {
+          await page.locator(".settings-menu-button").filter({ hasText: section }).click();
+          await page.getByRole("heading", { name: section, exact: true }).waitFor();
+          assert.ok(await page.locator(field).isVisible());
+          assert.equal(await page.locator(".settings-menu").count(), 0);
+          await page.getByRole("button", { name: "Назад към настройките" }).click();
+          assert.equal(await page.locator(field).count(), 0);
+        }
         await page.getByRole("tab", { name: "Командировки", exact: true }).click();
         await page.locator(".trip-card").click();
         if (await page.locator(".mobile-entry-card").isVisible()) {
