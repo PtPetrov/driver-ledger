@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { captureTripPricing, captureEntryPricing, serviceAmount, tripDriverAmounts, type TripPricing, type EntryPricing } from "@/lib/rate-snapshots";
 
 import {
   AlertDialog,
@@ -74,8 +75,9 @@ type RateUnit = "m3" | "day" | "hour" | "linear_m";
 type Driver = { id: string; name: string; rate: number; level: DriverLevel; color: string };
 type Direction = "outbound" | "return";
 type ReportPeriod = "past" | "future";
-type BusinessTrip = { id: string; number: string; departureDate: string; totalKilometers: number; restDays: number };
+type BusinessTrip = { id: string; number: string; departureDate: string; totalKilometers: number; restDays: number; pricing?: TripPricing };
 type Entry = {
+  pricing?: EntryPricing;
   id: string;
   tripId?: string;
   date: string;
@@ -196,11 +198,7 @@ const clientCount = (value: number) => `${value} ${value === 1 ? "клиент" 
 const unitLabel = (unit: RateUnit) => unit === "m3" ? "м³" : unit === "linear_m" ? "л/м" : unit === "day" ? "ден" : "час";
 
 const workForEntry = (entry: Entry, rates: RateSettings) => {
-  if (!entry.rateItemId || entry.rateItemId === "manual") return entry.workAmount;
-  const item = rates.activities.find((rate) => rate.id === entry.rateItemId);
-  if (!item) return entry.workAmount;
-  const amount = Math.max(entry.quantity || 0, 0) * item.rate;
-  return item.minimumApplies && amount > 0 ? Math.max(amount, rates.minimumBusiness) : amount;
+  return serviceAmount(entry, rates);
 };
 
 const driverRateForEntry = (entry: Entry, driver: Driver, rates: RateSettings) =>
@@ -286,7 +284,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   [drivers.length, rates, settings.singleDriverKilometerRate]);
 
   const effectiveDriverRateForEntry = useCallback((entry: Entry, driver: Driver) =>
-    drivers.length === 1 ? settings.singleDriverKilometerRate : driverRateForEntry(entry, driver, rates),
+    entry.pricing ? entry.pricing.kilometer[driver.id] ?? 0 : drivers.length === 1 ? settings.singleDriverKilometerRate : driverRateForEntry(entry, driver, rates),
   [drivers.length, rates, settings.singleDriverKilometerRate]);
 
   const flushSave = useCallback(async () => {
@@ -381,10 +379,10 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         const normalizedSettings = { ...initialSettings, ...result.document.settings };
         const normalizedRates = migrateRates(result.document.rates);
         const document = {
-          version: 8,
+          version: 9,
           drivers: result.document.drivers,
-          entries: result.document.entries,
-          trips: result.document.trips,
+          entries: result.document.entries.map((entry) => ({ ...entry, pricing: entry.pricing ?? captureEntryPricing(entry.rateItemId, result.document.drivers, normalizedRates, { ...normalizedSettings, vehicleClass: entry.vehicleClass || "up-to-8-8" }) })),
+          trips: result.document.trips.map((trip) => ({ ...trip, pricing: trip.pricing ?? captureTripPricing(result.document.drivers, normalizedRates, normalizedSettings) })),
           settings: normalizedSettings,
           rates: normalizedRates,
         };
@@ -413,7 +411,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    const document = { version: 8, drivers, entries, trips, settings, rates };
+    const document = { version: 9, drivers, entries, trips, settings, rates };
     const serialized = JSON.stringify(document);
     latestDocumentRef.current = { document, serialized };
     if (serialized === lastSavedRef.current) return;
@@ -452,7 +450,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
       setTripError("Датата на тръгване не може да е след вече въведен клиент.");
       return;
     }
-    const saved = { ...editingTrip, departureDate, id: editingTrip.id || `trip-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`, number: String(serial) };
+    const saved = { ...editingTrip, pricing: editingTrip.pricing ?? captureTripPricing(drivers, rates, settings), departureDate, id: editingTrip.id || `trip-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`, number: String(serial) };
     setTrips((current) => editingTrip.id ? current.map((trip) => trip.id === saved.id ? saved : trip) : [...current, saved]);
     setFormPage(null);
     openTrip(saved.id);
@@ -462,13 +460,13 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   const totals = useMemo(() => {
     const legacyEntries = entries.filter((entry) => !trips.some((trip) => trip.id === entry.tripId));
     const kilometers = trips.reduce((sum, trip) => sum + trip.totalKilometers, 0) + legacyEntries.reduce((sum, entry) => sum + entry.kilometers, 0);
-    const rest = trips.reduce((sum, trip) => sum + trip.restDays * rates.restPerDay, 0);
+    const rest = trips.reduce((sum, trip) => sum + trip.restDays * (trip.pricing?.restPerDay ?? rates.restPerDay), 0);
     const work = entries.reduce((sum, entry) => sum + workForEntry(entry, rates), 0) + rest;
     const byDriver = drivers.map((driver) => {
-      const tripKmTotal = trips.reduce((sum, trip) => sum + trip.totalKilometers * effectiveDriverRateForClass(settings.vehicleClass, driver), 0);
+      const tripKmTotal = trips.reduce((sum, trip) => sum + tripDriverAmounts(trip, driver.id, captureTripPricing(drivers, rates, settings)).kilometers, 0);
       const legacyKmTotal = legacyEntries.reduce((sum, entry) => sum + (entry.driverIds.includes(driver.id) ? entry.kilometers * effectiveDriverRateForEntry(entry, driver) : 0), 0);
       const workTotal = entries.reduce((sum, entry) => sum + entryForDriver(entry, driver, rates), 0);
-      const restTotal = drivers.length ? rest / drivers.length : 0;
+      const restTotal = trips.reduce((sum, trip) => sum + tripDriverAmounts(trip, driver.id, captureTripPricing(drivers, rates, settings)).rest, 0);
       return { ...driver, total: tripKmTotal + legacyKmTotal + workTotal + restTotal, kmTotal: tripKmTotal + legacyKmTotal };
     });
     return {
@@ -477,13 +475,12 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
       byDriver,
       total: byDriver.reduce((sum, driver) => sum + driver.total, 0),
     };
-  }, [drivers, entries, trips, rates, settings.vehicleClass, effectiveDriverRateForClass, effectiveDriverRateForEntry]);
+  }, [drivers, entries, trips, rates, settings, effectiveDriverRateForEntry]);
 
   const earningsForTrip = (trip: BusinessTrip, driver: Driver) => {
     const tripEntries = entries.filter((entry) => entry.tripId === trip.id);
-    const kilometers = trip.totalKilometers * effectiveDriverRateForClass(settings.vehicleClass, driver);
+    const { kilometers, rest } = tripDriverAmounts(trip, driver.id, captureTripPricing(drivers, rates, settings));
     const services = tripEntries.reduce((sum, entry) => sum + entryForDriver(entry, driver, rates), 0);
-    const rest = drivers.length ? trip.restDays * rates.restPerDay / drivers.length : 0;
     return { kilometers, services, rest, total: kilometers + services + rest };
   };
 
@@ -520,7 +517,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   };
 
   const openEditEntry = (entry: Entry) => {
-    setEditingEntry({ ...entry, driverIds: drivers.map((driver) => driver.id) });
+    setEditingEntry({ ...entry });
     setQuantityInput(entry.quantity ? String(entry.quantity) : "");
     setFormPage("entry");
   };
@@ -558,12 +555,15 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
       toast.error("Добавете име на клиент.");
       return;
     }
-    if (!service || (editingEntry.quantity || 0) <= 0) {
+    if (editingEntry.rateItemId !== "none" && (!service || (editingEntry.quantity || 0) <= 0)) {
       toast.error("Изберете услуга и въведете валидно количество.");
       return;
     }
     const isEditing = Boolean(editingEntry.id);
-    const normalized = { ...editingEntry, driverIds: drivers.map((driver) => driver.id), documentNo: editingEntry.documentNo.trim().toUpperCase(), date: trip.departureDate, kilometers: 0, activity: service.label };
+    const existing = entries.find((entry) => entry.id === editingEntry.id);
+    const pricing = existing && existing.rateItemId === editingEntry.rateItemId && existing.pricing
+      ? existing.pricing : captureEntryPricing(editingEntry.rateItemId, drivers, rates, { ...settings, vehicleClass: editingEntry.vehicleClass || "up-to-8-8" });
+    const normalized = { ...editingEntry, pricing, driverIds: existing?.driverIds ?? drivers.map((driver) => driver.id), documentNo: editingEntry.documentNo.trim().toUpperCase(), date: trip.departureDate, kilometers: 0, activity: service?.label || "", quantity: service ? editingEntry.quantity : 0, workAmount: 0 };
     const saved = isEditing ? normalized : { ...normalized, id: `entry-${Date.now()}` };
     setEntries((current) =>
       isEditing
@@ -684,8 +684,11 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.vehicle, totals, selectedTrip, trips]);
 
-  const selectedRateItem = rates.activities.find((item) => item.id === editingEntry.rateItemId);
-  const editingWorkAmount = workForEntry(editingEntry, rates);
+  const savedEntry = entries.find((entry) => entry.id === editingEntry.id);
+  const editingPricing = savedEntry && savedEntry.rateItemId === editingEntry.rateItemId && savedEntry.pricing
+    ? savedEntry.pricing : captureEntryPricing(editingEntry.rateItemId, drivers, rates, { ...settings, vehicleClass: editingEntry.vehicleClass || "up-to-8-8" });
+  const selectedRateItem = editingPricing.service ? { ...editingPricing.service, minimumApplies: editingPricing.service.minimum > 0 } : undefined;
+  const editingWorkAmount = workForEntry({ ...editingEntry, pricing: editingPricing }, rates);
   const formPageContent = formPage === "trip" ? (
     <section className="form-page" aria-labelledby="trip-form-title">
       <Button type="button" variant="ghost" className="trip-back" onClick={() => setFormPage(null)}><ArrowLeft /> Назад</Button>
@@ -707,9 +710,9 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
         <form onSubmit={saveEntry} className="entry-form">
           {editingEntry.id ? <div className="field"><Label htmlFor="entry-trip">Командировка</Label><Select value={editingEntryTrip?.id || ""} onValueChange={(value) => setEditingEntry((current) => ({ ...current, tripId: value }))}><SelectTrigger id="entry-trip" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{trips.map((trip) => <SelectItem key={trip.id} value={trip.id}>№ {trip.number} · {fullDate(trip.departureDate)}</SelectItem>)}</SelectContent></Select><p className="field-help">Командировката, към която принадлежи клиентът.</p></div> : <div className="entry-trip-context"><BriefcaseBusiness /><span>Командировка № {editingEntryTrip?.number}<small>Тръгване: {editingEntryTrip ? fullDate(editingEntryTrip.departureDate) : ""}</small></span></div>}
           <div className="form-grid two"><div className="field"><Label htmlFor="entry-document">Номер на файл</Label><Input id="entry-document" required value={editingEntry.documentNo} onChange={(event) => { const value = event.target.value.toUpperCase(); const suffix = value.replace(/^SEE?-?/i, ""); setEditingEntry((current) => ({ ...current, documentNo: value ? `SEE-${suffix}` : "" })); }} /><p className="field-help">Номерът винаги започва с SEE-.</p></div><div className="field"><Label htmlFor="entry-client">Име на клиент</Label><Input id="entry-client" required value={editingEntry.client} onChange={(event) => setEditingEntry((current) => ({ ...current, client: event.target.value }))} /><p className="field-help">Име на лице или фирма.</p></div></div>
-          <div className="activity-calculator"><div className="field"><Label>Услуга</Label><Select value={editingEntry.rateItemId || "none"} onValueChange={(value) => { setQuantityInput(""); setEditingEntry((current) => ({ ...current, rateItemId: value, quantity: 0, activity: rates.activities.find((item) => item.id === value)?.label || "" })); }}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">—</SelectItem>{rates.activities.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent></Select><p className="field-help">Изберете извършената дейност по действащите ставки.</p></div>{selectedRateItem && <><div className="field"><Label htmlFor="entry-quantity">Количество ({unitLabel(selectedRateItem.unit)})</Label><Input id="entry-quantity" type="text" inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" required value={quantityInput} onChange={(event) => { const value = event.target.value; if (!/^\d*(?:\.\d{0,2})?$/.test(value)) return; setQuantityInput(value); setEditingEntry((current) => ({ ...current, quantity: Number(value) || 0 })); }} /><p className="field-help">Можете да използвате десетична точка, например 1.25.</p></div><div className="calculated-work"><span>Стойност на услугата</span><strong>{money(editingWorkAmount, settings.currency)}</strong><small>{number(editingEntry.quantity || 0, 2)} {unitLabel(selectedRateItem.unit)} × {money(selectedRateItem.rate, settings.currency)}{selectedRateItem.minimumApplies && editingWorkAmount === rates.minimumBusiness ? ` · приложен минимум ${money(rates.minimumBusiness, settings.currency)}` : ""}</small></div></>}</div>
+          <div className="activity-calculator"><div className="field"><Label>Услуга</Label><Select value={editingEntry.rateItemId || "none"} onValueChange={(value) => { setQuantityInput(""); setEditingEntry((current) => ({ ...current, rateItemId: value, quantity: 0, activity: rates.activities.find((item) => item.id === value)?.label || "" })); }}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Без добавена услуга</SelectItem>{rates.activities.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent></Select><p className="field-help">Незадължително. Може да запазите клиента и да добавите услуга по-късно. Запазената услуга запазва своята ставка.</p></div>{selectedRateItem && <><div className="field"><Label htmlFor="entry-quantity">Количество ({unitLabel(selectedRateItem.unit)})</Label><Input id="entry-quantity" type="text" inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" required value={quantityInput} onChange={(event) => { const value = event.target.value; if (!/^\d*(?:\.\d{0,2})?$/.test(value)) return; setQuantityInput(value); setEditingEntry((current) => ({ ...current, quantity: Number(value) || 0 })); }} /><p className="field-help">Можете да използвате десетична точка, например 1.25.</p></div><div className="calculated-work"><span>Стойност на услугата</span><strong>{money(editingWorkAmount, settings.currency)}</strong><small>{number(editingEntry.quantity || 0, 2)} {unitLabel(selectedRateItem.unit)} × {money(selectedRateItem.rate, settings.currency)}{selectedRateItem.minimumApplies && editingWorkAmount === selectedRateItem.minimum ? ` · приложен минимум ${money(selectedRateItem.minimum, settings.currency)}` : ""}</small></div></>}</div>
           <div className="field"><Label htmlFor="entry-note">Бележка</Label><Input id="entry-note" value={editingEntry.reference} onChange={(event) => setEditingEntry((current) => ({ ...current, reference: event.target.value }))} /><p className="field-help">Незадължителна допълнителна информация.</p></div>
-          <div className="live-calculation"><div><span>Труд за клиента</span><strong>{money(workForEntry(editingEntry, rates), settings.currency)}</strong></div><div className="calculation-split">{drivers.filter((driver) => editingEntry.driverIds.includes(driver.id)).map((driver) => <span key={driver.id}>{driver.name}: <b>{money(entryForDriver(editingEntry, driver, rates), settings.currency)}</b></span>)}</div></div>
+          <div className="live-calculation"><div><span>Труд за клиента</span><strong>{money(editingWorkAmount, settings.currency)}</strong></div><div className="calculation-split">{drivers.filter((driver) => editingEntry.driverIds.includes(driver.id)).map((driver) => <span key={driver.id}>{driver.name}: <b>{money(entryForDriver({ ...editingEntry, pricing: editingPricing }, driver, rates), settings.currency)}</b></span>)}</div></div>
           <div className={`form-page-actions ${editingEntry.id ? "with-delete" : ""}`}>
             {editingEntry.id && <AlertDialog><AlertDialogTrigger asChild><Button type="button" variant="outline" className="delete-action"><Trash2 /> Изтрий клиента</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Изтриване на клиента?</AlertDialogTitle><AlertDialogDescription>Клиентът и изчислената за него сума ще бъдат премахнати от командировката.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Отказ</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => deleteEntry(editingEntry.id)}>Изтрий клиента</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
             <Button type="button" variant="outline" onClick={() => setFormPage(null)}>Отказ</Button><Button type="submit">{editingEntry.id ? "Запази промените" : "Добави клиента"}</Button>
@@ -720,11 +723,11 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   ) : formPage === "rest" && selectedTrip ? (
     <section className="form-page" aria-labelledby="rest-form-title">
       <Button type="button" variant="ghost" className="trip-back" onClick={() => setFormPage(null)}><ArrowLeft /> Назад</Button>
-      <div className="form-page-heading"><p className="eyebrow">Командировка № {selectedTrip.number}</p><h1 id="rest-form-title">{selectedTrip.restDays ? "Редакция на почивка" : "Добавяне на почивка"}</h1><p>Една почивка е 24 часа и се заплаща общо {money(rates.restPerDay, settings.currency)} за двамата шофьори.</p></div>
+      <div className="form-page-heading"><p className="eyebrow">Командировка № {selectedTrip.number}</p><h1 id="rest-form-title">{selectedTrip.restDays ? "Редакция на почивка" : "Добавяне на почивка"}</h1><p>Една почивка е 24 часа и се заплаща общо {money(selectedTrip.pricing?.restPerDay ?? rates.restPerDay, settings.currency)} по запазената ставка на командировката.</p></div>
       <Card className="panel form-page-card"><CardContent className="panel-content">
         <form onSubmit={saveRest} className="entry-form">
           <div className="field"><Label htmlFor="rest-days">Брой почивки по 24 часа</Label><Input id="rest-days" type="number" inputMode="numeric" min="1" step="1" required value={editingRestDays || ""} onChange={(event) => setEditingRestDays(Number(event.target.value) || 0)} /><p className="field-help">Въведете броя на завършените 24-часови периоди.</p></div>
-          <div className="live-calculation"><div><span>Общо за двамата шофьори</span><strong>{money(editingRestDays * rates.restPerDay, settings.currency)}</strong></div><div className="calculation-split"><span>{number(editingRestDays, 0)} × 24 часа × <b>{money(rates.restPerDay, settings.currency)}</b></span><span>За всеки: <b>{money(editingRestDays * rates.restPerDay / 2, settings.currency)}</b></span></div></div>
+          <div className="live-calculation"><div><span>Общо за двамата шофьори</span><strong>{money(editingRestDays * (selectedTrip.pricing?.restPerDay ?? rates.restPerDay), settings.currency)}</strong></div><div className="calculation-split"><span>{number(editingRestDays, 0)} × 24 часа × <b>{money(selectedTrip.pricing?.restPerDay ?? rates.restPerDay, settings.currency)}</b></span><span>За всеки: <b>{money(editingRestDays * (selectedTrip.pricing?.restPerDay ?? rates.restPerDay) / Math.max(Object.keys(selectedTrip.pricing?.kilometer ?? {}).length, 1), settings.currency)}</b></span></div></div>
           <div className="form-page-actions"><Button type="button" variant="outline" onClick={() => setFormPage(null)}>Отказ</Button><Button type="submit">{selectedTrip.restDays ? "Запази промените" : "Добави почивка"}</Button></div>
         </form>
       </CardContent></Card>
@@ -758,7 +761,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
             {reportDriver ? <>
               <Button variant="ghost" className="trip-back" onClick={() => setReportDriverId(null)}><ArrowLeft /> Назад към отчета</Button>
               <section className="overview-heading driver-detail-heading">
-                <div className="driver-detail-title"><span className="driver-avatar large" style={{ backgroundColor: reportDriver.color }}>{reportDriver.name.slice(0, 2).toUpperCase()}</span><div><p className="eyebrow">Подробен отчет</p><h1>{reportDriver.name}</h1><p>{reportDriver.level === "senior" ? "Старши шофьор" : "Младши шофьор"} · {money(effectiveDriverRateForClass(settings.vehicleClass, reportDriver), settings.currency)}/км</p></div></div>
+                <div className="driver-detail-title"><span className="driver-avatar large" style={{ backgroundColor: reportDriver.color }}>{reportDriver.name.slice(0, 2).toUpperCase()}</span><div><p className="eyebrow">Подробен отчет</p><h1>{reportDriver.name}</h1><p>{reportDriver.level === "senior" ? "Старши шофьор" : "Младши шофьор"} · {money(reportTrip?.pricing ? reportTrip.pricing.kilometer[reportDriver.id] ?? 0 : effectiveDriverRateForClass(settings.vehicleClass, reportDriver), settings.currency)}/км</p></div></div>
               </section>
 
               <section className="driver-detail-summary" aria-label={`Обобщение за ${reportDriver.name}`}>
@@ -780,7 +783,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
                 <div className="report-driver-grid">
                   {drivers.map((driver, index) => {
                     const earnings = earningsForTrip(reportTrip, driver);
-                    return <button className={index === 0 ? "report-driver-card featured" : "report-driver-card"} key={driver.id} onClick={() => setReportDriverId(driver.id)}><span className="report-driver-top"><span className="report-driver-title"><span>Шофьор</span><b>{driver.name}</b></span><span className="report-driver-icon" style={{ backgroundColor: index === 0 ? "#62e6a7" : driver.color }}>{driver.name.slice(0, 2).toUpperCase()}</span></span><strong>{money(earnings.total, settings.currency)}</strong><span className="report-driver-meta">{driver.level === "senior" ? "Старши шофьор" : "Младши шофьор"} · {money(effectiveDriverRateForClass(settings.vehicleClass, driver), settings.currency)}/км</span><span className="report-driver-link">Подробен отчет <ChevronRight /></span></button>;
+                    return <button className={index === 0 ? "report-driver-card featured" : "report-driver-card"} key={driver.id} onClick={() => setReportDriverId(driver.id)}><span className="report-driver-top"><span className="report-driver-title"><span>Шофьор</span><b>{driver.name}</b></span><span className="report-driver-icon" style={{ backgroundColor: index === 0 ? "#62e6a7" : driver.color }}>{driver.name.slice(0, 2).toUpperCase()}</span></span><strong>{money(earnings.total, settings.currency)}</strong><span className="report-driver-meta">{driver.level === "senior" ? "Старши шофьор" : "Младши шофьор"} · {money(reportTrip?.pricing ? reportTrip.pricing.kilometer[driver.id] ?? 0 : effectiveDriverRateForClass(settings.vehicleClass, driver), settings.currency)}/км</span><span className="report-driver-link">Подробен отчет <ChevronRight /></span></button>;
                   })}
                 </div>
                 <div className="report-combined-total"><span><Users /> {drivers.length === 2 ? "Общо за двамата шофьори" : `Общо за ${drivers.length} шофьори`}</span><strong>{money(reportTripTotal, settings.currency)}</strong></div>
@@ -799,7 +802,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
                 {[...trips].sort((a, b) => b.departureDate.localeCompare(a.departureDate) || Number(b.number) - Number(a.number)).map((trip) => {
                   const records = entries.filter((entry) => entry.tripId === trip.id);
                   const km = trip.totalKilometers;
-                  const total = drivers.reduce((sum, driver) => sum + trip.totalKilometers * effectiveDriverRateForClass(settings.vehicleClass, driver) + records.reduce((amount, entry) => amount + entryForDriver(entry, driver, rates), 0), 0) + trip.restDays * rates.restPerDay;
+                  const total = drivers.reduce((sum, driver) => sum + earningsForTrip(trip, driver).total, 0);
                   return <button className="trip-card" key={trip.id} onClick={() => openTrip(trip.id)}>
                     <span className="trip-card-top"><span className="trip-icon"><BriefcaseBusiness /></span><Badge variant="secondary">{records.length ? clientCount(records.length) : "Без клиенти"}</Badge></span>
                     <strong className="trip-card-title">Командировка № {trip.number}</strong>
@@ -820,7 +823,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
               <div><p className="eyebrow">{clientCount(scopedEntries.length)}</p><h1>{selectedTrip ? `Командировка № ${selectedTrip.number}` : "Без командировка"}</h1><p>{selectedTrip ? `${fullDate(selectedTrip.departureDate)} · ${number(selectedTrip.totalKilometers)} км · ${settings.vehicle}` : "Отворете клиент, за да го свържете с командировка."}</p></div>
               <div className="heading-actions">{selectedTrip && <><Button variant="outline" aria-label="Редактирай командировката" onClick={() => { setEditingTrip({ ...selectedTrip }); setTripError(""); setFormPage("trip"); }}><Pencil /><span>Редактирай</span></Button><Button variant="outline" onClick={openRestPage}><CalendarDays /> {selectedTrip.restDays ? "Редактирай почивка" : "Добави почивка"}</Button><AlertDialog><AlertDialogTrigger asChild><Button variant="outline" className="destructive-outline"><Trash2 /> Изтрий</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Изтриване на командировка № {selectedTrip.number}?</AlertDialogTitle><AlertDialogDescription>{scopedEntries.length ? `Командировката и свързаните с нея ${clientCount(scopedEntries.length)} ще бъдат изтрити.` : "Командировката ще бъде изтрита."} Това действие не може да бъде отменено.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Отказ</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => deleteTrip(selectedTrip)}>Изтрий командировката</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog><Button onClick={openNewEntry}><Plus /> Нов клиент</Button></>}</div>
             </section>
-            {selectedTrip && <div className="trip-summary"><div><span>Общо километри</span><strong>{number(selectedTrip.totalKilometers)} км</strong></div><div><span>Услуги</span><strong>{money(scopedEntries.reduce((sum, entry) => sum + workForEntry(entry, rates), 0), settings.currency)}</strong></div><div><span>Почивка (общо)</span><strong>{money(selectedTrip.restDays * rates.restPerDay, settings.currency)}</strong></div>{drivers.map((driver) => <div key={driver.id}><span>За {driver.name}</span><strong>{money(selectedTrip.totalKilometers * effectiveDriverRateForClass(settings.vehicleClass, driver) + scopedEntries.reduce((sum, entry) => sum + entryForDriver(entry, driver, rates), 0) + (drivers.length ? selectedTrip.restDays * rates.restPerDay / drivers.length : 0), settings.currency)}</strong></div>)}</div>}
+            {selectedTrip && <div className="trip-summary"><div><span>Общо километри</span><strong>{number(selectedTrip.totalKilometers)} км</strong></div><div><span>Услуги</span><strong>{money(scopedEntries.reduce((sum, entry) => sum + workForEntry(entry, rates), 0), settings.currency)}</strong></div><div><span>Почивка (общо)</span><strong>{money(selectedTrip.restDays * (selectedTrip.pricing?.restPerDay ?? rates.restPerDay), settings.currency)}</strong></div>{drivers.map((driver) => <div key={driver.id}><span>За {driver.name}</span><strong>{money(earningsForTrip(selectedTrip, driver).total, settings.currency)}</strong></div>)}</div>}
             <Card className="panel entries-panel">
               <CardContent className="panel-content entries-content">
                 <div className="filters-row">
@@ -836,8 +839,8 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
                         <TableRow key={entry.id}>
                           <TableCell><div className="table-primary">{entry.documentNo}</div><div className="table-secondary">Командировка № {selectedTrip?.number}</div></TableCell>
                           <TableCell><div className="table-primary">{entry.client || "-"}</div></TableCell>
-                          <TableCell><div className="table-primary">{rates.activities.find((item) => item.id === entry.rateItemId)?.label || entry.activity || "-"}</div></TableCell>
-                          <TableCell className="text-right table-primary">{entry.quantity ? `${number(entry.quantity, 2)} ${unitLabel(rates.activities.find((item) => item.id === entry.rateItemId)?.unit || "m3")}` : "-"}</TableCell>
+                          <TableCell><div className="table-primary">{entry.pricing?.service?.label || entry.activity || "Без добавена услуга"}</div></TableCell>
+                          <TableCell className="text-right table-primary">{entry.quantity ? `${number(entry.quantity, 2)} ${unitLabel(entry.pricing?.service?.unit || "m3")}` : "-"}</TableCell>
                           {drivers.map((driver) => <TableCell key={driver.id} className="text-right table-primary">{entry.driverIds.includes(driver.id) ? money(entryForDriver(entry, driver, rates), settings.currency) : "-"}</TableCell>)}
                           <TableCell>
                             <DropdownMenu>
@@ -857,21 +860,21 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
                 <div className="mobile-entry-list">
                   {filteredEntries.map((entry) => (
                     <button className="mobile-entry-card" key={entry.id} onClick={() => openEditEntry(entry)}>
-                      <span className="mobile-entry-top"><span>{entry.documentNo}</span><Badge variant="secondary">{entry.quantity ? `${number(entry.quantity, 2)} ${unitLabel(rates.activities.find((item) => item.id === entry.rateItemId)?.unit || "m3")}` : "Услуга"}</Badge></span>
+                      <span className="mobile-entry-top"><span>{entry.documentNo}</span><Badge variant="secondary">{entry.quantity ? `${number(entry.quantity, 2)} ${unitLabel(entry.pricing?.service?.unit || "m3")}` : "Без услуга"}</Badge></span>
                       <strong>{entry.client || "Без клиент"}</strong>
-                      <small>{rates.activities.find((item) => item.id === entry.rateItemId)?.label || entry.activity || "Услуга"}</small>
+                      <small>{entry.pricing?.service?.label || entry.activity || "Без добавена услуга"}</small>
                       <span className="mobile-entry-bottom"><span>Труд общо</span><b>{money(workForEntry(entry, rates), settings.currency)}</b></span>
                     </button>
                   ))}
                 </div>
-                {!filteredEntries.length && <div className="empty-state"><ReceiptText /><h3>{scopedEntries.length ? "Няма намерени клиенти" : selectedTrip ? "Командировката е готова за първия клиент" : "Всички клиенти са разпределени"}</h3><p>{scopedEntries.length ? "Променете търсенето." : selectedTrip ? "Добавете SEE-номер, име на клиент, услуга и количество." : "Ще ги намерите в съответните командировки."}</p>{selectedTrip && !scopedEntries.length && <Button className="mt-5" onClick={openNewEntry}><Plus /> Добави първи клиент</Button>}</div>}
+                {!filteredEntries.length && <div className="empty-state"><ReceiptText /><h3>{scopedEntries.length ? "Няма намерени клиенти" : selectedTrip ? "Командировката е готова за първия клиент" : "Всички клиенти са разпределени"}</h3><p>{scopedEntries.length ? "Променете търсенето." : selectedTrip ? "Добавете SEE-номер и име на клиент. Услуга може да добавите по-късно." : "Ще ги намерите в съответните командировки."}</p>{selectedTrip && !scopedEntries.length && <Button className="mt-5" onClick={openNewEntry}><Plus /> Добави първи клиент</Button>}</div>}
               </CardContent>
             </Card>
             </>}
           </TabsContent>
 
           <TabsContent value="rates" className="space-y-5">
-            <section className="page-heading"><div><p className="eyebrow">{rates.effectiveDate ? `В сила от ${fullDate(rates.effectiveDate)}` : "Дата на влизане в сила не е зададена"}</p><h1>Ставки</h1><p>Тези стойности се използват автоматично при изчисляване на клиентите, услугите и почивката.</p></div></section>
+            <section className="page-heading"><div><p className="eyebrow">{rates.effectiveDate ? `В сила от ${fullDate(rates.effectiveDate)}` : "Дата на влизане в сила не е зададена"}</p><h1>Ставки</h1><p>Промените важат за нови услуги и нови командировки. Вече запазените ставки и исторически суми не се променят.</p></div></section>
 
             <section className="rates-summary">
               <Card className="rate-summary-card featured"><CardContent className="p-0"><span>Минимално заплащане</span><strong>{money(rates.minimumBusiness, settings.currency)}</strong><small>за товарене, разтоварване или доставка</small></CardContent></Card>

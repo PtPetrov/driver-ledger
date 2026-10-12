@@ -70,6 +70,13 @@ export async function PUT(request: NextRequest) {
     return json({ error: "Невалиден формат на данните." }, 400);
   }
 
+  if (typeof input === "object" && input !== null && "document" in input) {
+    const document = input.document;
+    if (typeof document === "object" && document !== null && "version" in document && document.version !== 9) {
+      return json({ error: "Обновете страницата, за да използвате защитените исторически ставки." }, 426);
+    }
+  }
+
   const parsed = ledgerSaveSchema.safeParse(input);
   if (!parsed.success) return json({ error: "Данните не преминаха проверката." }, 422);
 
@@ -79,6 +86,9 @@ export async function PUT(request: NextRequest) {
   });
 
   if (error) {
+    if (error.message.includes("stale_ledger_client")) {
+      return json({ error: "Обновете страницата, преди да записвате промени." }, 426);
+    }
     if (error.message.includes("rate_limit_exceeded")) {
       return json({ error: "Твърде много промени. Опитайте отново след минута." }, 429, { "Retry-After": "60" });
     }
