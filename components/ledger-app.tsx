@@ -761,7 +761,18 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
               <div><span>Услуги шофьори</span><strong>{money(tripServiceTotals.drivers, settings.currency)}</strong></div>
               <div><span>Услуги помощници</span><strong>{money(tripServiceTotals.helpers, settings.currency)}</strong></div>
               <div><span>Почивка (общо)</span><strong>{money(selectedTrip.restDays * (selectedTrip.pricing?.restPerDay ?? rates.restPerDay), settings.currency)}</strong></div>
-              {drivers.map((driver) => <div key={driver.id}><span>За {driver.name}</span><strong>{money(earningsForTrip(selectedTrip, driver).total, settings.currency)}</strong></div>)}
+              {drivers.map((driver) => {
+                const earnings = earningsForTrip(selectedTrip, driver);
+                return <div key={driver.id} className="trip-driver-earnings">
+                  <h2>За {driver.name}</h2>
+                  <dl className="trip-driver-breakdown">
+                    <div><dt>Километри</dt><dd>{money(earnings.kilometers, settings.currency)}</dd></div>
+                    <div><dt>Услуги</dt><dd>{money(earnings.services, settings.currency)}</dd></div>
+                    <div><dt>Почивка</dt><dd>{money(earnings.rest, settings.currency)}</dd></div>
+                  </dl>
+                  <div className="trip-driver-total"><span>Общо за изплащане</span><strong>{money(earnings.total, settings.currency)}</strong></div>
+                </div>;
+              })}
             </div>}
             <Card className="panel entries-panel">
               <CardContent className="panel-content entries-content">
