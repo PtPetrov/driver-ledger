@@ -118,8 +118,8 @@ const initialRates: RateSettings = {
     "up-to-11-99": { senior: 0.10, junior: 0.09 },
   },
   activities: [
-    { id: "warehouse-loading", label: "Товарене от склад на РОССИН-90", rate: 3, unit: "m3", minimumApplies: true },
-    { id: "warehouse-unloading", label: "Разтоварване в склад на РОССИН-90", rate: 3, unit: "m3", minimumApplies: true },
+    { id: "warehouse-loading", label: "Товарене от склад на Matrix", rate: 3, unit: "m3", minimumApplies: true },
+    { id: "warehouse-unloading", label: "Разтоварване в склад на Matrix", rate: 3, unit: "m3", minimumApplies: true },
     { id: "agent-warehouse-loading", label: "Товарене от склад на агент", rate: 3, unit: "m3", minimumApplies: true },
     { id: "agent-warehouse-unloading", label: "Разтоварване в склад на агент", rate: 3, unit: "m3", minimumApplies: true },
     { id: "commercial-loading", label: "Товарене на търговски пратки (линеен метър)", rate: 5, unit: "linear_m" },
@@ -233,6 +233,8 @@ const legacyRateSources: Record<string, string> = {
   assembly: "assembly",
   disassembly: "assembly",
 };
+
+const serviceDisplayLabel = (label: string) => label.replaceAll("РОССИН-90", "Matrix");
 
 const migrateRates = (saved?: Partial<RateSettings>) => {
   if (!saved) return initialRates;
@@ -412,7 +414,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
   const filteredEntries = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("bg");
     return scopedEntries.filter((entry) => {
-      const haystack = `${entry.documentNo} ${entry.client} ${entry.activity}`.toLocaleLowerCase("bg");
+      const haystack = `${entry.documentNo} ${entry.client} ${serviceDisplayLabel(entry.pricing?.service?.label || entry.activity)}`.toLocaleLowerCase("bg");
       return !query || haystack.includes(query);
     });
   }, [scopedEntries, search]);
@@ -789,7 +791,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
                         <TableRow key={entry.id}>
                           <TableCell><div className="table-primary">{entry.documentNo}</div><div className="table-secondary">Командировка ZK {selectedTrip?.number}</div></TableCell>
                           <TableCell><div className="table-primary">{entry.client || "-"}</div></TableCell>
-                          <TableCell><div className="table-primary">{entry.pricing?.service?.label || entry.activity || "Без добавена услуга"}</div>{(entry.helperCount ?? 0) > 0 && <div className="table-secondary">Помощници: {entry.helperCount}</div>}</TableCell>
+                          <TableCell><div className="table-primary">{serviceDisplayLabel(entry.pricing?.service?.label || entry.activity || "Без добавена услуга")}</div>{(entry.helperCount ?? 0) > 0 && <div className="table-secondary">Помощници: {entry.helperCount}</div>}</TableCell>
                           <TableCell className="text-right table-primary">{entry.quantity ? `${number(entry.quantity, 2)} ${unitLabel(entry.pricing?.service?.unit || "m3")}` : "-"}</TableCell>
                           {drivers.map((driver) => <TableCell key={driver.id} className="text-right table-primary">{entry.driverIds.includes(driver.id) ? money(entryForDriver(entry, driver, rates), settings.currency) : "-"}</TableCell>)}
                           <TableCell>
@@ -812,7 +814,7 @@ export default function LedgerApp({ userEmail }: { userEmail: string }) {
                     <button className="mobile-entry-card" key={entry.id} onClick={() => openEditEntry(entry)}>
                       <span className="mobile-entry-top"><span>{entry.documentNo}</span><Badge variant="secondary">{entry.quantity ? `${number(entry.quantity, 2)} ${unitLabel(entry.pricing?.service?.unit || "m3")}` : "Без услуга"}</Badge></span>
                       <strong>{entry.client || "Без клиент"}</strong>
-                      <small>{entry.pricing?.service?.label || entry.activity || "Без добавена услуга"}{(entry.helperCount ?? 0) > 0 ? ` · Помощници: ${entry.helperCount}` : ""}</small>
+                      <small>{serviceDisplayLabel(entry.pricing?.service?.label || entry.activity || "Без добавена услуга")}{(entry.helperCount ?? 0) > 0 ? ` · Помощници: ${entry.helperCount}` : ""}</small>
                       <span className="mobile-entry-bottom"><span>Труд общо</span><b>{money(workForEntry(entry, rates), settings.currency)}</b></span>
                     </button>
                   ))}
