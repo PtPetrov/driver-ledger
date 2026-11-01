@@ -1,3 +1,4 @@
+import { supportsDistance } from "./service-distance.ts";
 import { z } from "zod";
 
 const boundedMoney = z.number().finite().min(0).max(1_000_000);
@@ -41,6 +42,7 @@ const entrySchema = z.object({
   vehicleClass: z.enum(["up-to-8-8", "up-to-11-99"]).optional(),
   rateItemId: z.string().max(100).optional(),
   quantity: boundedQuantity.optional(),
+  distanceMeters: z.number().int().min(0).max(100_000).default(0),
   helperCount: z.number().int().min(0).max(1000).default(0),
   driverIds: z.array(z.string().max(80)).max(20),
   pricing: z.object({ service: servicePricingSchema.nullable(), kilometer: kilometerSnapshot }),
@@ -55,9 +57,9 @@ const rateItemSchema = z.object({
 });
 
 export const ledgerDocumentSchema = z.object({
-  version: z.literal(10),
+  version: z.literal(11),
   drivers: z.array(driverSchema).min(1).max(20),
-  entries: z.array(entrySchema).max(5_000),
+  entries: z.array(entrySchema.refine(entry => entry.distanceMeters === 0 || supportsDistance(entry.rateItemId), { message: "Услугата не допуска надбавка за разстояние." })).max(5_000),
   trips: z.array(tripSchema).max(1_000),
   settings: z.object({
     vehicle: z.string().trim().max(40),

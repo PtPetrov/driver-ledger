@@ -85,8 +85,8 @@ export async function PUT(request: NextRequest) {
 
   if (typeof input === "object" && input !== null && "document" in input) {
     const document = input.document;
-    if (typeof document === "object" && document !== null && "version" in document && document.version !== 10) {
-      return json({ error: "Обновете страницата, за да използвате актуалната версия и помощниците." }, 426);
+    if (typeof document === "object" && document !== null && "version" in document && document.version !== 11) {
+      return json({ error: "Обновете страницата, за да използвате актуалната версия и разстоянията." }, 426);
     }
   }
 
@@ -99,6 +99,7 @@ export async function PUT(request: NextRequest) {
   });
 
   if (error) {
+    if (error.message.includes("invalid_distance")) return json({ error: "Въведете валидно разстояние за избраната услуга." }, 422);
     if (error.message.includes("invalid_helper_count")) {
       return json({ error: "Въведете валиден цял брой помощници." }, 422);
     }

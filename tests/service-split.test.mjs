@@ -27,7 +27,7 @@ test('allocated cents always add up, even for small totals and many helpers', ()
   }
 });
 test('helper count must be a bounded non-negative integer', () => {
-  const helperSchema = ledgerDocumentSchema.shape.entries.element.shape.helperCount;
+  const helperSchema = ledgerDocumentSchema.shape.entries.element.innerType().shape.helperCount;
   assert.equal(helperSchema.parse(undefined), 0);
   for (const count of [-1, .5, 1001, Infinity, '2']) assert.equal(helperSchema.safeParse(count).success, false);
   assert.equal(helperSchema.parse(2), 2);

@@ -732,3 +732,7 @@ button, input { font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+.distance-breakdown { display: grid; gap: 10px; padding-top: 20px; }
+.distance-breakdown > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; font-size: .875rem; }
+.distance-breakdown b { font-variant-numeric: tabular-nums; }

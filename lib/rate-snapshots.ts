@@ -1,3 +1,5 @@
+import { distancePercent } from "./service-distance.ts";
+
 /** Saved prices, not references to the editable rate catalogue. */
 export type ServicePricing = {
   id: string;
@@ -38,13 +40,14 @@ export function captureEntryPricing(rateItemId: string | undefined, drivers: Dri
   };
 }
 
-export function serviceAmount(entry: { rateItemId?: string; quantity?: number; workAmount: number; pricing?: EntryPricing }, rates: Rates) {
+export function serviceAmount(entry: { rateItemId?: string; quantity?: number; workAmount: number; pricing?: EntryPricing; distanceMeters?: number }, rates: Rates) {
   if (entry.rateItemId === "none") return 0;
   if (!entry.rateItemId || entry.rateItemId === "manual") return entry.workAmount;
   const service = entry.pricing ? entry.pricing.service : captureEntryPricing(entry.rateItemId, [], rates, { vehicleClass: "up-to-8-8", singleDriverKilometerRate: 0 }).service;
   if (!service) return entry.workAmount;
   const amount = Math.max(entry.quantity || 0, 0) * service.rate;
-  return amount > 0 ? Math.max(amount, service.minimum) : 0;
+  const base = amount > 0 ? Math.max(amount, service.minimum) : 0;
+  return base * (1 + distancePercent(entry.rateItemId, entry.distanceMeters) / 100);
 }
 
 export function tripDriverAmounts(trip: { totalKilometers: number; restDays: number; pricing?: TripPricing }, driverId: string, fallback: TripPricing) {
